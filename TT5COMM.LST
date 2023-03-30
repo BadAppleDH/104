@@ -1,0 +1,2855 @@
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   1
+
+
+
+ ERR  LINE  ADDR OBJ
+
+         1  0000
+         2  0000
+         3  0000
+         4                      		;THIS IS A PROGRAM FOR THE TT5
+         5                      		;TERMINAL TO COMMUNICATE WITH THE
+         6                      		;PROLOG 7842-1 Z80 CPU CARD.
+         7  0000
+         8                      		;       IN THE MAIN PROGRAM THAT USES THIS MODULE IT WILL
+         9                      		;  NEED TO CALL CHREC.
+        10                      		;  	THIS WILL CALL THE ROUTINE AND CHECK IF THE RECEIVED
+        11                      		;  FLAG IS SET, AND IF SO WILL PERFORM THE PROCESS.  THE
+        12                      		;  RECEIVED FLAG WILL BE SET WHEN INFORMATION IS COMING IN
+        13                      		;  FROM THE TT5 TERMINAL.
+        14                      		;	THE PROGRAM IS MADE TRANSPARENT IN THAT IF THE
+        15                      		;  TRANSMIT BUFFER FILLS, A FLAG IN THE SIO IS SET.
+        16                      		;  THE LOCATION WILL BE PLACED IN A JUMP REGISTER SO
+        17                      		;  THE NEXT TIME THE PROGRAM IS CALLED, AND IF THE TRANSMIT
+        18                      		;  BUFFER FLAG IS RESET, THE LOCATION WILL BE RETURNED TO AND
+        19                      		;  THE DESIRED TASK WILL CONTINUE.	
+        20                      		;	IT IS RECOMMENDED THAT THE PROGRAM BE CALLED ON
+        21                      		;  A TIMED BASIS SUCH AS EVERY 10mS.
+        22  0000
+        23  0000
+        24                      	NAME 	COMM
+        25  0000
+        26                      	GLOBAL	VAL1,VAL2,CHREC,SIOI,VAL10
+        27                      	EXTRN	DISPLAY,DISPLAYC,ESIRLY
+        28  0000
+        29                      	ORG	1000H
+        30  1000
+        31                      	;*********************MACRO DEFINITIONS******************
+        32  1000
+        33                      WRITE		MACRO	#X1,#X2,#X3,#X4
+        34
+        35                      	LD	HL,W#$YM
+        36                      	IFC	#X4,C
+        37                      	CALL	DISPLAYC
+        38                      	ELSE
+        39                      	CALL	DISPLAY
+        40                      	ENDC
+        41                      	JP	W2#$YM
+        42                      W#$YM	IFC	#X3,C
+        43                      	DB	12-((W2#$YM-W3#$YM)/2)+((#X2-1)*24)
+        44
+        45                      	ELSE
+        46                      	DB	(#X3-1)+((#X2-1)*24)
+        47                      	ENDC
+        48                      W3#$YM	DEFM	'#X1'
+        49                      W2#$YM	NOP
+        50                      	ENDM
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   2
+
+
+
+ ERR  LINE  ADDR OBJ
+
+        51  1000
+        52                      		;****************************************************
+        53  1000
+        54  1000
+        55  1000
+        56  A100                TT5MEM	EQU	0A100H			;RAM LOCATION FOR TESTMARK PROGRAM.
+        57  A104                VAL1	EQU	TT5MEM+04H		;OUTPUT VALUE MEMORY LOCATION.
+        58  A108                VAL2	EQU	TT5MEM+08H		;LOOP BIT MEMORY LOCATION.
+        59  A10C                VAL3	EQU	TT5MEM+0CH		;CHANGE CONTENTS MEMORY.	
+        60  A110                VAL4	EQU	TT5MEM+10H		;CHANGE CONTENTS MEMORY.
+        61  A114                VAL5	EQU	TT5MEM+14H		;CHANGE CONTENTS MEMORY.
+        62  A118                VAL6	EQU	TT5MEM+18H		;CHANGE MEMORY LOCATION MEMORY.
+        63  A11C                VAL7	EQU	TT5MEM+1CH		;PROGRAM TT5 MEMORY LOCATION.
+        64  A120                VAL8	EQU	TT5MEM+20H		;INCREMENT OR DECREMENT REGISTER.
+        65  A124                VAL9	EQU	TT5MEM+24H		;INCREMENT OR DECTRMENT REGISTER.
+        66  A128                VAL10	EQU	TT5MEM+28H
+        67  A12C                JUMP1	EQU	TT5MEM+2CH		;POLL LOOP MEMORY LOCATION.
+        68  A130                JUMP2	EQU	TT5MEM+30H		;WAIT LOOP MEMORY LOCATION.
+        69  A134                LOCA	EQU	TT5MEM+34H		;LOCATION OF WHERE TO JUMP FROM LOOP.
+        70  A138                COUNT	EQU	TT5MEM+38H		;LOCATION TO SAVE THE OUTPUT COUNT.
+        71  A13C                SVBC	EQU	TT5MEM+3CH		;LOCATION TO SAVE THE BC VALUE.
+        72  A140                BITV	EQU	TT5MEM+40H		;LOCATION FOR PORT READ FUNCTION.
+        73  A144                PORV	EQU	TT5MEM+44H		;LOCATION FOR PORT READ FUNCTION.
+        74  A148                PTPL	EQU	TT5MEM+48H		;PORT VIEW POLL LOCA MEMORY REGISTER.
+        75  A14C                JUMP3	EQU	TT5MEM+4CH		;POLLA LOOP MEMORY LOCATION.
+        76  A150                TOGV	EQU	TT5MEM+50H		;PORT BIT TOGGLE MEMORY LOCATION.
+        77  A154                SPOT	EQU	TT5MEM+54H		;INPUT VALUE STORAGE LOCATION
+        78  1000
+        79  1000 ED 5B 3C A1    CHREC:	LD DE,(SVBC)	;RESTORE THE CONTENTS OF THE BC REG PAIR.
+        80  1004 42             	LD B,D
+        81  1005 4B             	LD C,E
+        82  1006 3A 08 A1       	LD A,(VAL2)	;CHECK IF IN THE POLL LOOP.
+        83  1009 CB 47          	BIT 0,A
+        84  100B CA 12 10       	JP Z,FST
+        85  100E 2A 2C A1       	LD HL,(JUMP1)	;JUMP TO PRESET LOCATION.
+        86  1011 E9             	JP (HL)
+        87  1012 3A 08 A1       FST:	LD A,(VAL2)	;CHECK IF IN THE WAIT LOOP.
+        88  1015 CB 4F          	BIT 1,A
+        89  1017 CA 1E 10       	JP Z,SND
+        90  101A 2A 30 A1       	LD HL,(JUMP2)	;JUMP TO PRESET LOCATION.
+        91  101D E9             	JP (HL)
+        92  101E 3A 08 A1       SND:	LD A,(VAL2)	;CHECK IF IN THE POLLA LOOP FOR PORT MONITOR.
+        93  1021 CB 67          	BIT 4,A
+        94  1023 CA 2A 10       	JP Z,TRD
+        95  1026 2A 4C A1       	LD HL,(JUMP3)	;JUMP TO PRESET LOCATION.
+        96  1029 E9             	JP (HL)
+        97  102A 3E 00          TRD:	LD A,00H
+        98  102C D3 F5          	OUT 0F5H,A	;POINT WR0 AT RR0.
+        99  102E DB F5          	IN A,0F5H
+       100  1030 CB 47          	BIT 0,A		;SEE IF THERE IS VALUE TO READ.
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   3
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       101  1032 C2 36 10       	JP NZ,NXT
+       102  1035 C9             	RET
+       103  1036 DB F4          NXT:	IN A,0F4H	;INPUT THE TT5 DATA VALUE.
+       104  1038 32 54 A1       	LD (SPOT),A	;STORE THE VALUE IN REGISTER FOR LATER COMPARISONS
+       105  103B FE 18          	CP 18H		;SEE IF THE COMMAND IS A CLEAR REQUEST
+       106  103D CA 02 12       	JP Z,CLEAR
+       107  1040 3A 00 00    E  	LD A,(ESIRLY)
+       108  1043 FE 00          	CP 00H		;SEE IF ANY ERROR FLAGS ARE SET
+       109  1045 C2 77 10       	JP NZ,ERDIS
+       110  1048 3A 54 A1       	LD A,(SPOT)
+       111  104B FE 61          	CP 61H		;SEE IF THE VALUE IS HELP REQUEST.
+       112  104D CA 38 12       	JP Z,HELP
+       113  1050 FE 62          	CP 62H		;CHECK IF TOGGLING PORT VALUE BITS.
+       114  1052 CA 00 1F       	JP Z,TOGGLE
+       115  1055 FE 63          	CP 63H		;CHECK IF MEMORY LOCATION VIEW REQUEST.
+       116  1057 CA 81 14       	JP Z,MVIEW
+       117  105A FE 65          	CP 65H		;CHECK IF VIEWING PORT LOCATION.
+       118  105C CA 0F 1A       	JP Z,PTVIEW	
+       119  105F FE 64          	CP 64H		;CHECK IF CHANGE MEMORY.
+       120  1061 CA FF 16       	JP Z,CHVAL
+       121  1064 FE 66          	CP 66H		;CHECK IF CHANGE PORT VALUE.
+       122  1066 CA 50 1C       	JP Z,PCHG
+       123  1069 FE 2A          	CP 2AH		;CHECK IF PROGRAMMING TT5 BY PRESSING ASTERIK.
+       124  106B CA DA 18       	JP Z,PRTT5
+       125  106E D3 F4          	OUT 0F4H,A	;ECHO BACK VALUE AND RETURN.
+       126  1070 50             	LD D,B
+       127  1071 59             	LD E,C
+       128  1072 ED 53 3C A1    	LD (SVBC),DE	;STORE THE CONTENTS OF THE BC REG PAIR.
+       129  1076 C9             	RET
+       130  1077
+       131  1077 3A 00 00    E  ERDIS:	LD A,(ESIRLY)
+       132  107A CB 47          	BIT	0,A		;CHECK IF GO AND LO ARE BOTH SET
+       133  107C C2 9E 11       	JP	NZ,GOLOER
+       134  107F CB 4F          	BIT	1,A		;CHECK IF GO AND HI ARE BOTH SET
+       135  1081 C2 5F 11       	JP	NZ,GOHIER
+       136  1084 CB 57          	BIT	2,A		;CHECK IF ALL RELAYS ARE CLOSED
+       137  1086 C2 20 11       	JP	NZ,ALLER
+       138  1089 CB 5F          	BIT	3,A		;CHECK IF NO RELAYS ARE CLOSED
+       139  108B C2 DB 10       	JP	NZ,NONER
+       140  108E CB 67          	BIT	4,A		;CHECK IF HI AND LO ARE BOTH SET
+       141  1090 C2 94 10       	JP	NZ,HILOER
+       142  1093 C9             	RET
+       143  1094
+       144  1094                HILOER:	WRITE	'PART TESTED HIGH AND LOW',1,C,C
+       144  1094               +
+       144  1094 21 9D 10      +	LD	HL,W0000
+       144                     +	IFC	C,C
+       144  1097 CD 00 00    E +	CALL	DISPLAYC
+       144                     +	ELSE
+       144                     +	CALL	DISPLAY
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   4
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       144                     +	ENDC
+       144  109A C3 B6 10      +	JP	W20000
+       144                     +W0000	IFC	C,C
+       144  109D 00            +	DB	12-((W20000-W30000)/2)+((1-1)*24)
+       144  109E               +
+       144                     +	ELSE
+       144                     +	DB	(C-1)+((1-1)*24)
+       144                     +	ENDC
+       144  109E 50 41 52 54   +W30000	DEFM	'PART TESTED HIGH AND LOW'
+       144  10A2 20 54 45 53   +
+       144  10A6 54 45 44 20   +
+       144  10AA 48 49 47 48   +
+       144  10AE 20 41 4E 44   +
+       144  10B2 20 4C 4F 57   +
+       144  10B6 00            +W20000	NOP
+       145  10B7                	WRITE	'CHECK COMPARATOR SETTING',2,C
+       145  10B7               +
+       145  10B7 21 C0 10      +	LD	HL,W0001
+       145                     +	IFC	,C
+       145                     +	CALL	DISPLAYC
+       145                     +	ELSE
+       145  10BA CD 00 00    E +	CALL	DISPLAY
+       145                     +	ENDC
+       145  10BD C3 D9 10      +	JP	W20001
+       145                     +W0001	IFC	C,C
+       145  10C0 18            +	DB	12-((W20001-W30001)/2)+((2-1)*24)
+       145  10C1               +
+       145                     +	ELSE
+       145                     +	DB	(C-1)+((2-1)*24)
+       145                     +	ENDC
+       145  10C1 43 48 45 43   +W30001	DEFM	'CHECK COMPARATOR SETTING'
+       145  10C5 4B 20 43 4F   +
+       145  10C9 4D 50 41 52   +
+       145  10CD 41 54 4F 52   +
+       145  10D1 20 53 45 54   +
+       145  10D5 54 49 4E 47   +
+       145  10D9 00            +W20001	NOP
+       146  10DA C9             	RET
+       147  10DB
+       148  10DB                NONER:	WRITE	'TEST RESULTS NOT PRESENT',1,C,C
+       148  10DB               +
+       148  10DB 21 E4 10      +	LD	HL,W0002
+       148                     +	IFC	C,C
+       148  10DE CD 00 00    E +	CALL	DISPLAYC
+       148                     +	ELSE
+       148                     +	CALL	DISPLAY
+       148                     +	ENDC
+       148  10E1 C3 FD 10      +	JP	W20002
+       148                     +W0002	IFC	C,C
+       148  10E4 00            +	DB	12-((W20002-W30002)/2)+((1-1)*24)
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   5
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       148  10E5               +
+       148                     +	ELSE
+       148                     +	DB	(C-1)+((1-1)*24)
+       148                     +	ENDC
+       148  10E5 54 45 53 54   +W30002	DEFM	'TEST RESULTS NOT PRESENT'
+       148  10E9 20 52 45 53   +
+       148  10ED 55 4C 54 53   +
+       148  10F1 20 4E 4F 54   +
+       148  10F5 20 50 52 45   +
+       148  10F9 53 45 4E 54   +
+       148  10FD 00            +W20002	NOP
+       149  10FE                	WRITE	'CHECK COMPARATOR POWER',2,C
+       149  10FE               +
+       149  10FE 21 07 11      +	LD	HL,W0003
+       149                     +	IFC	,C
+       149                     +	CALL	DISPLAYC
+       149                     +	ELSE
+       149  1101 CD 00 00    E +	CALL	DISPLAY
+       149                     +	ENDC
+       149  1104 C3 1E 11      +	JP	W20003
+       149                     +W0003	IFC	C,C
+       149  1107 19            +	DB	12-((W20003-W30003)/2)+((2-1)*24)
+       149  1108               +
+       149                     +	ELSE
+       149                     +	DB	(C-1)+((2-1)*24)
+       149                     +	ENDC
+       149  1108 43 48 45 43   +W30003	DEFM	'CHECK COMPARATOR POWER'
+       149  110C 4B 20 43 4F   +
+       149  1110 4D 50 41 52   +
+       149  1114 41 54 4F 52   +
+       149  1118 20 50 4F 57   +
+       149  111C 45 52         +
+       149  111E 00            +W20003	NOP
+       150  111F C9             	RET
+       151  1120
+       152  1120                ALLER:	WRITE	'ALL TEST RESULTS PRESENT',1,C,C
+       152  1120               +
+       152  1120 21 29 11      +	LD	HL,W0004
+       152                     +	IFC	C,C
+       152  1123 CD 00 00    E +	CALL	DISPLAYC
+       152                     +	ELSE
+       152                     +	CALL	DISPLAY
+       152                     +	ENDC
+       152  1126 C3 42 11      +	JP	W20004
+       152                     +W0004	IFC	C,C
+       152  1129 00            +	DB	12-((W20004-W30004)/2)+((1-1)*24)
+       152  112A               +
+       152                     +	ELSE
+       152                     +	DB	(C-1)+((1-1)*24)
+       152                     +	ENDC
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   6
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       152  112A 41 4C 4C 20   +W30004	DEFM	'ALL TEST RESULTS PRESENT'
+       152  112E 54 45 53 54   +
+       152  1132 20 52 45 53   +
+       152  1136 55 4C 54 53   +
+       152  113A 20 50 52 45   +
+       152  113E 53 45 4E 54   +
+       152  1142 00            +W20004	NOP
+       153  1143                	WRITE	'CHECK COMPARATOR',2,C
+       153  1143               +
+       153  1143 21 4C 11      +	LD	HL,W0005
+       153                     +	IFC	,C
+       153                     +	CALL	DISPLAYC
+       153                     +	ELSE
+       153  1146 CD 00 00    E +	CALL	DISPLAY
+       153                     +	ENDC
+       153  1149 C3 5D 11      +	JP	W20005
+       153                     +W0005	IFC	C,C
+       153  114C 1C            +	DB	12-((W20005-W30005)/2)+((2-1)*24)
+       153  114D               +
+       153                     +	ELSE
+       153                     +	DB	(C-1)+((2-1)*24)
+       153                     +	ENDC
+       153  114D 43 48 45 43   +W30005	DEFM	'CHECK COMPARATOR'
+       153  1151 4B 20 43 4F   +
+       153  1155 4D 50 41 52   +
+       153  1159 41 54 4F 52   +
+       153  115D 00            +W20005	NOP
+       154  115E C9             	RET
+       155  115F
+       156  115F                GOHIER:	WRITE	'PART TESTS GOOD AND HIGH',1,C,C
+       156  115F               +
+       156  115F 21 68 11      +	LD	HL,W0006
+       156                     +	IFC	C,C
+       156  1162 CD 00 00    E +	CALL	DISPLAYC
+       156                     +	ELSE
+       156                     +	CALL	DISPLAY
+       156                     +	ENDC
+       156  1165 C3 81 11      +	JP	W20006
+       156                     +W0006	IFC	C,C
+       156  1168 00            +	DB	12-((W20006-W30006)/2)+((1-1)*24)
+       156  1169               +
+       156                     +	ELSE
+       156                     +	DB	(C-1)+((1-1)*24)
+       156                     +	ENDC
+       156  1169 50 41 52 54   +W30006	DEFM	'PART TESTS GOOD AND HIGH'
+       156  116D 20 54 45 53   +
+       156  1171 54 53 20 47   +
+       156  1175 4F 4F 44 20   +
+       156  1179 41 4E 44 20   +
+       156  117D 48 49 47 48   +
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   7
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       156  1181 00            +W20006	NOP
+       157  1182                	WRITE	'CHECK COMPARATOR',2,C
+       157  1182               +
+       157  1182 21 8B 11      +	LD	HL,W0007
+       157                     +	IFC	,C
+       157                     +	CALL	DISPLAYC
+       157                     +	ELSE
+       157  1185 CD 00 00    E +	CALL	DISPLAY
+       157                     +	ENDC
+       157  1188 C3 9C 11      +	JP	W20007
+       157                     +W0007	IFC	C,C
+       157  118B 1C            +	DB	12-((W20007-W30007)/2)+((2-1)*24)
+       157  118C               +
+       157                     +	ELSE
+       157                     +	DB	(C-1)+((2-1)*24)
+       157                     +	ENDC
+       157  118C 43 48 45 43   +W30007	DEFM	'CHECK COMPARATOR'
+       157  1190 4B 20 43 4F   +
+       157  1194 4D 50 41 52   +
+       157  1198 41 54 4F 52   +
+       157  119C 00            +W20007	NOP
+       158  119D C9             	RET
+       159  119E
+       160  119E                GOLOER:	WRITE	'PART TESTED GOOD AND LOW',1,C,C
+       160  119E               +
+       160  119E 21 A7 11      +	LD	HL,W0008
+       160                     +	IFC	C,C
+       160  11A1 CD 00 00    E +	CALL	DISPLAYC
+       160                     +	ELSE
+       160                     +	CALL	DISPLAY
+       160                     +	ENDC
+       160  11A4 C3 C0 11      +	JP	W20008
+       160                     +W0008	IFC	C,C
+       160  11A7 00            +	DB	12-((W20008-W30008)/2)+((1-1)*24)
+       160  11A8               +
+       160                     +	ELSE
+       160                     +	DB	(C-1)+((1-1)*24)
+       160                     +	ENDC
+       160  11A8 50 41 52 54   +W30008	DEFM	'PART TESTED GOOD AND LOW'
+       160  11AC 20 54 45 53   +
+       160  11B0 54 45 44 20   +
+       160  11B4 47 4F 4F 44   +
+       160  11B8 20 41 4E 44   +
+       160  11BC 20 4C 4F 57   +
+       160  11C0 00            +W20008	NOP
+       161  11C1                	WRITE	'CHECK COMPARATOR',2,C
+       161  11C1               +
+       161  11C1 21 CA 11      +	LD	HL,W0009
+       161                     +	IFC	,C
+       161                     +	CALL	DISPLAYC
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   8
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       161                     +	ELSE
+       161  11C4 CD 00 00    E +	CALL	DISPLAY
+       161                     +	ENDC
+       161  11C7 C3 DB 11      +	JP	W20009
+       161                     +W0009	IFC	C,C
+       161  11CA 1C            +	DB	12-((W20009-W30009)/2)+((2-1)*24)
+       161  11CB               +
+       161                     +	ELSE
+       161                     +	DB	(C-1)+((2-1)*24)
+       161                     +	ENDC
+       161  11CB 43 48 45 43   +W30009	DEFM	'CHECK COMPARATOR'
+       161  11CF 4B 20 43 4F   +
+       161  11D3 4D 50 41 52   +
+       161  11D7 41 54 4F 52   +
+       161  11DB 00            +W20009	NOP
+       162  11DC C9             	RET
+       163  11DD
+       164  11DD
+       165  11DD
+       166  11DD 3E 18          SIOI:	LD A,18H	;RESET THE SIO REGISTERS.
+       167  11DF D3 F5          	OUT 0F5H,A	
+       168  11E1 3E 14          	LD A,14H	;POINT TO WR4.
+       169  11E3 D3 F5          	OUT 0F5H,A
+       170  11E5 3E 07          	LD A,07H	;CHANGE 0 TO 4 FOR 2400 OR LESS BAUD. ********
+       171  11E7 D3 F5          	OUT 0F5H,A
+       172  11E9 3E 13          	LD A,13H	;POINT TO WR3.
+       173  11EB D3 F5          	OUT 0F5H,A
+       174  11ED 3E C3          	LD A,0C3H
+       175  11EF D3 F5          	OUT 0F5H,A
+       176  11F1 3E 15          	LD A,15H	;POINT TO WR5.
+       177  11F3 D3 F5          	OUT 0F5H,A
+       178  11F5 3E 6A          	LD A,6AH
+       179  11F7 D3 F5          	OUT 0F5H,A
+       180  11F9 3E 11          	LD A,11H	;POINT TO WR1.
+       181  11FB D3 F5          	OUT 0F5H,A
+       182  11FD 3E 00          	LD A,00H
+       183  11FF D3 F5          	OUT 0F5H,A
+       184  1201 C9             	RET
+       185  1202
+       186  1202 3E 0C          CLEAR:	LD A,0CH
+       187  1204 D3 F4          	OUT 0F4H,A
+       188  1206 3E 00          	LD A,00H	;CLEAR THE LOCATION FLAGS
+       189  1208 32 08 A1       	LD (VAL2),A
+       190  120B 32 50 A1       	LD (TOGV),A
+       191  120E C9             	RET
+       192  120F
+       193  120F DB F5          WAITL:	IN A,0F5H	;CHECK TO SEE IF TRANSMIT READY BIT SET.
+       194  1211 CB 57          	BIT 2,A
+       195  1213 C2 2C 12       	JP NZ,WAITL1
+       196  1216 11 0F 12       	LD DE,WAITL
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE   9
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       197  1219 ED 53 30 A1    	LD (JUMP2),DE	;IF NOT READY TO TRANSMIT THEN SET THE LOOP BIT
+       198  121D 3A 08 A1       	LD A,(VAL2)	;AND RETURN TO MAIN PROGRAM.
+       199  1220 CB CF          	SET 1,A
+       200  1222 32 08 A1       	LD (VAL2),A
+       201  1225 50             	LD D,B		;SAVE THE REGISTER PAIR BC CONTENTS
+       202  1226 59             	LD E,C
+       203  1227 ED 53 3C A1    	LD (SVBC),DE
+       204  122B C9             	RET
+       205  122C 3A 08 A1       WAITL1:	LD A,(VAL2)	;WHEN READY TO TRANSMIT NEXT BIT RESET THE LOOP BIT.
+       206  122F CB 8F          	RES 1,A
+       207  1231 32 08 A1       	LD (VAL2),A
+       208  1234 2A 34 A1       	LD HL,(LOCA)	;JUMP BACK TO PRESET LOCATION.
+       209  1237 E9             	JP (HL)
+       210  1238
+       211  1238
+       212  1238 3E 0C          HELP:	LD A,0CH	;CLEAR SCREEN.
+       213  123A D3 F4          	OUT 0F4H,A
+       214  123C 11 46 12       	LD DE,HELP1
+       215  123F ED 53 34 A1    	LD (LOCA),DE
+       216  1243 C3 0F 12       	JP WAITL
+       217  1246 01 62 21       HELP1:	LD BC,MESS1	;PRINT OUT THE HELP MENU INSTRUCTIONS.
+       218  1249 3E 2E          	LD A,2EH
+       219  124B 32 38 A1       	LD (COUNT),A
+       220  124E 0A             OUTA:	LD A,(BC)	;OUTPUT THE STRING.
+       221  124F D3 F4          	OUT 0F4H,A
+       222  1251 11 5B 12       	LD DE,OUT1
+       223  1254 ED 53 34 A1    	LD (LOCA),DE
+       224  1258 C3 0F 12       	JP WAITL
+       225  125B 03             OUT1:	INC BC
+       226  125C 3A 38 A1       	LD A,(COUNT)
+       227  125F 3D             	DEC A
+       228  1260 32 38 A1       	LD (COUNT),A
+       229  1263 FE 00          	CP 00H
+       230  1265 C2 4E 12       	JP NZ,OUTA
+       231  1268 11 72 12       	LD DE,HELP2	;CHECK FOR CONTINUE OR NEXT MESSAGE.
+       232  126B ED 53 34 A1    	LD (LOCA),DE
+       233  126F C3 58 14       	JP POLL
+       234  1272 DB F4          HELP2:	IN A,0F4H
+       235  1274 FE 18          	CP 18H		;SEE IF EXITING THE HELP MESSAGE.
+       236  1276 C2 7C 12       	JP NZ,MORE2
+       237  1279 C3 02 12       	JP CLEAR
+       238  127C 3E 0C          MORE2:	LD A,0CH	;CLEAR SCREEN AND DISPLAY F2 MESSAGE.
+       239  127E D3 F4          	OUT 0F4H,A
+       240  1280 11 8A 12       	LD DE,F21A
+       241  1283 ED 53 34 A1    	LD (LOCA),DE
+       242  1287 C3 0F 12       	JP WAITL
+       243  128A 01 90 21       F21A:	LD BC,HELPF2
+       244  128D 3E 2C          	LD A,2CH
+       245  128F 32 38 A1       	LD (COUNT),A
+       246  1292 0A             OUTF2:	LD A,(BC)
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  10
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       247  1293 D3 F4          	OUT 0F4H,A
+       248  1295 11 9F 12       	LD DE,F21B
+       249  1298 ED 53 34 A1    	LD (LOCA),DE
+       250  129C C3 0F 12       	JP WAITL
+       251  129F 03             F21B:	INC BC
+       252  12A0 3A 38 A1       	LD A,(COUNT)
+       253  12A3 3D             	DEC A
+       254  12A4 32 38 A1       	LD (COUNT),A
+       255  12A7 FE 00          	CP 00H
+       256  12A9 C2 92 12       	JP NZ,OUTF2
+       257  12AC 11 B6 12       	LD DE,F21C
+       258  12AF ED 53 34 A1    	LD (LOCA),DE
+       259  12B3 C3 58 14       	JP POLL
+       260  12B6 DB F4          F21C:	IN A,0F4H
+       261  12B8 FE 18          	CP 18H
+       262  12BA C2 C0 12       	JP NZ,F21D
+       263  12BD C3 02 12       	JP CLEAR
+       264  12C0 3E 0C          F21D:	LD A,0CH	;CLEAR SCREEN AND DISPLAY F3 HELP MESSAGE.
+       265  12C2 D3 F4          	OUT 0F4H,A	
+       266  12C4 11 CE 12       	LD DE,MORE2A
+       267  12C7 ED 53 34 A1    	LD (LOCA),DE
+       268  12CB C3 0F 12       	JP WAITL
+       269  12CE 01 BC 21       MORE2A:	LD BC,MESS2	
+       270  12D1 3E 2F          	LD A,2FH
+       271  12D3 32 38 A1       	LD (COUNT),A
+       272  12D6 0A             OUTB:	LD A,(BC)
+       273  12D7 D3 F4          	OUT 0F4H,A
+       274  12D9 11 E3 12       	LD DE,OUT2
+       275  12DC ED 53 34 A1    	LD (LOCA),DE
+       276  12E0 C3 0F 12       	JP WAITL
+       277  12E3 03             OUT2:	INC BC
+       278  12E4 3A 38 A1       	LD A,(COUNT)
+       279  12E7 3D             	DEC A
+       280  12E8 32 38 A1       	LD (COUNT),A
+       281  12EB FE 00          	CP 00H
+       282  12ED C2 D6 12       	JP NZ,OUTB
+       283  12F0 11 FA 12       	LD DE,MORE2B	;CHECK FOR CONTINUE OR NEXT MESSAGE.
+       284  12F3 ED 53 34 A1    	LD (LOCA),DE
+       285  12F7 C3 58 14       	JP POLL
+       286  12FA DB F4          MORE2B:	IN A,0F4H
+       287  12FC FE 18          	CP 18H
+       288  12FE C2 04 13       	JP NZ,MORE3
+       289  1301 C3 02 12       	JP CLEAR
+       290  1304 3E 0C          MORE3:	LD A,0CH	;CLEAR SCREEN AND DISPLAY F4 HELP MESSAGE.
+       291  1306 D3 F4          	OUT 0F4H,A
+       292  1308 11 12 13       	LD DE,MORE3A
+       293  130B ED 53 34 A1    	LD (LOCA),DE
+       294  130F C3 0F 12       	JP WAITL
+       295  1312 01 1A 22       MORE3A:	LD BC,MESS3
+       296  1315 3E 2F          	LD A,2FH
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  11
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       297  1317 32 38 A1       	LD (COUNT),A
+       298  131A 0A             OUTC:	LD A,(BC)
+       299  131B D3 F4          	OUT 0F4H,A
+       300  131D 11 27 13       	LD DE,OUT3
+       301  1320 ED 53 34 A1    	LD (LOCA),DE
+       302  1324 C3 0F 12       	JP WAITL
+       303  1327 03             OUT3:	INC BC
+       304  1328 3A 38 A1       	LD A,(COUNT)
+       305  132B 3D             	DEC A
+       306  132C 32 38 A1       	LD (COUNT),A
+       307  132F FE 00          	CP 00H
+       308  1331 C2 1A 13       	JP NZ,OUTC
+       309  1334 11 3E 13       	LD DE,MORE3B
+       310  1337 ED 53 34 A1    	LD (LOCA),DE
+       311  133B C3 58 14       	JP POLL
+       312  133E DB F4          MORE3B:	IN A,0F4H	;CHECK IF LEAVING THE HELP MENU.
+       313  1340 FE 18          	CP 18H
+       314  1342 C2 48 13       	JP NZ,MORE4
+       315  1345 C3 02 12       	JP CLEAR
+       316  1348 3E 0C          MORE4:	LD A,0CH	;CLEAR SCREEN AND DISPLAY F5 MESSAGE.
+       317  134A D3 F4          	OUT 0F4H,A
+       318  134C 11 56 13       	LD DE,MORE4A
+       319  134F ED 53 34 A1    	LD (LOCA),DE
+       320  1353 C3 0F 12       	JP WAITL
+       321  1356 01 EB 21       MORE4A:	LD BC,MESS4
+       322  1359 3E 2F          	LD A,2FH
+       323  135B 32 38 A1       	LD (COUNT),A
+       324  135E 0A             OUTD:	LD A,(BC)
+       325  135F D3 F4          	OUT 0F4H,A
+       326  1361 11 6B 13       	LD DE,OUT4
+       327  1364 ED 53 34 A1    	LD (LOCA),DE
+       328  1368 C3 0F 12       	JP WAITL
+       329  136B 03             OUT4:	INC BC
+       330  136C 3A 38 A1       	LD A,(COUNT)
+       331  136F 3D             	DEC A
+       332  1370 32 38 A1       	LD (COUNT),A
+       333  1373 FE 00          	CP 00H
+       334  1375 C2 5E 13       	JP NZ,OUTD
+       335  1378 11 82 13       	LD DE,MORE4B
+       336  137B ED 53 34 A1    	LD (LOCA),DE
+       337  137F C3 58 14       	JP POLL
+       338  1382 DB F4          MORE4B:	IN A,0F4H
+       339  1384 FE 18          	CP 18H
+       340  1386 C2 8C 13       	JP NZ,MORE5A
+       341  1389 C3 02 12       	JP CLEAR
+       342  138C 3E 0C          MORE5A:	LD A,0CH	;CLEAR SCREEN AND DISPLAY F6 MESSAGE.
+       343  138E D3 F4          	OUT 0F4H,A
+       344  1390 11 9A 13       	LD DE,MORE5B
+       345  1393 ED 53 34 A1    	LD (LOCA),DE
+       346  1397 C3 0F 12       	JP WAITL
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  12
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       347  139A 01 49 22       MORE5B:	LD BC,MESS5
+       348  139D 3E 29          	LD A,29H
+       349  139F 32 38 A1       	LD (COUNT),A
+       350  13A2 0A             OUTIT:	LD A,(BC)
+       351  13A3 D3 F4          	OUT 0F4H,A
+       352  13A5 11 AF 13       	LD DE,OUTAT
+       353  13A8 ED 53 34 A1    	LD (LOCA),DE
+       354  13AC C3 0F 12       	JP WAITL
+       355  13AF 03             OUTAT:	INC BC
+       356  13B0 3A 38 A1       	LD A,(COUNT)
+       357  13B3 3D             	DEC A
+       358  13B4 32 38 A1       	LD (COUNT),A
+       359  13B7 FE 00          	CP 00H
+       360  13B9 C2 A2 13       	JP NZ,OUTIT
+       361  13BC 11 C6 13       	LD DE,MORE5C
+       362  13BF ED 53 34 A1    	LD (LOCA),DE
+       363  13C3 C3 58 14       	JP POLL
+       364  13C6 DB F4          MORE5C:	IN A,0F4H
+       365  13C8 FE 18          	CP 18H
+       366  13CA C2 D0 13       	JP NZ,F71
+       367  13CD C3 02 12       	JP CLEAR
+       368  13D0 3E 0C          F71:	LD A,0CH
+       369  13D2 D3 F4          	OUT 0F4H,A
+       370  13D4 11 DE 13       	LD DE,F7A
+       371  13D7 ED 53 34 A1    	LD (LOCA),DE
+       372  13DB C3 0F 12       	JP WAITL
+       373  13DE 01 72 22       F7A:	LD BC,HELPF7
+       374  13E1 3E 2F          	LD A,2FH
+       375  13E3 32 38 A1       	LD (COUNT),A
+       376  13E6 0A             OUTF7:	LD A,(BC)
+       377  13E7 D3 F4          	OUT 0F4H,A
+       378  13E9 11 F3 13       	LD DE,F7B
+       379  13EC ED 53 34 A1    	LD (LOCA),DE
+       380  13F0 C3 0F 12       	JP WAITL
+       381  13F3 03             F7B:	INC BC
+       382  13F4 3A 38 A1       	LD A,(COUNT)
+       383  13F7 3D             	DEC A
+       384  13F8 32 38 A1       	LD (COUNT),A
+       385  13FB FE 00          	CP 00H
+       386  13FD C2 E6 13       	JP NZ,OUTF7
+       387  1400 11 0A 14       	LD DE,F7C
+       388  1403 ED 53 34 A1    	LD (LOCA),DE
+       389  1407 C3 58 14       	JP POLL
+       390  140A DB F4          F7C:	IN A,0F4H
+       391  140C FE 18          	CP 18H
+       392  140E C2 14 14       	JP NZ,F7D
+       393  1411 C3 02 12       	JP CLEAR
+       394  1414 3E 0C          F7D:	LD A,0CH	;CLEAR SCREEN AN DISPLAY F8 MESSAGE.
+       395  1416 D3 F4          	OUT 0F4H,A
+       396  1418 11 22 14       	LD DE,F8A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  13
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       397  141B ED 53 34 A1    	LD (LOCA),DE
+       398  141F C3 0F 12       	JP WAITL
+       399  1422 01 A1 22       F8A:	LD BC,HELPF8
+       400  1425 3E 2F          	LD A,2FH
+       401  1427 32 38 A1       	LD (COUNT),A
+       402  142A 0A             OUTF8:	LD A,(BC)
+       403  142B D3 F4          	OUT 0F4H,A
+       404  142D 11 37 14       	LD DE,F8B
+       405  1430 ED 53 34 A1    	LD (LOCA),DE
+       406  1434 C3 0F 12       	JP WAITL
+       407  1437 03             F8B:	INC BC
+       408  1438 3A 38 A1       	LD A,(COUNT)
+       409  143B 3D             	DEC A
+       410  143C 32 38 A1       	LD (COUNT),A
+       411  143F FE 00          	CP 00H
+       412  1441 C2 2A 14       	JP NZ,OUTF8
+       413  1444 11 4E 14       	LD DE,F8C
+       414  1447 ED 53 34 A1    	LD (LOCA),DE
+       415  144B C3 58 14       	JP POLL
+       416  144E 11 02 12       F8C:	LD DE,CLEAR	;CLEAR SCREEN WHEN NEXT KEY IS PRESSED.
+       417  1451 ED 53 34 A1    	LD (LOCA),DE
+       418  1455 C3 0F 12       	JP WAITL
+       419  1458
+       420  1458
+       421  1458 DB F5          POLL:	IN A,0F5H	;CHECK IF THERE IS A CHARACTER IN THE INPUT BUFFER.
+       422  145A CB 47          	BIT 0,A
+       423  145C C2 75 14       	JP NZ,POLL1
+       424  145F 11 58 14       	LD DE,POLL
+       425  1462 ED 53 2C A1    	LD (JUMP1),DE	;SET THE LOOP BIT AND THE LOCATION FOR THE POLL LOOP.
+       426  1466 3A 08 A1       	LD A,(VAL2)
+       427  1469 CB C7          	SET 0,A
+       428  146B 32 08 A1       	LD (VAL2),A
+       429  146E 50             	LD D,B		;SAVE THE BC REGISTER PAIR.
+       430  146F 59             	LD E,C
+       431  1470 ED 53 3C A1    	LD (SVBC),DE
+       432  1474 C9             	RET
+       433  1475 3A 08 A1       POLL1:	LD A,(VAL2)	;CLEAR THE POLL LOOP BIT AND JUMP TO PRESET LOCA.
+       434  1478 CB 87          	RES 0,A
+       435  147A 32 08 A1       	LD (VAL2),A
+       436  147D 2A 34 A1       	LD HL,(LOCA)
+       437  1480 E9             	JP (HL)
+       438  1481
+       439  1481 3E 0C          MVIEW:	LD A,0CH
+       440  1483 D3 F4          	OUT 0F4H,A
+       441  1485 11 8F 14       	LD DE,MVIE1
+       442  1488 ED 53 34 A1    	LD (LOCA),DE
+       443  148C C3 0F 12       	JP WAITL
+       444  148F 01 D0 22       MVIE1:	LD BC,F2MES	;REQUEST WHAT MEMORY LOCATION TO VIEW.
+       445  1492 3E 17          	LD A,17H
+       446  1494 32 38 A1       	LD (COUNT),A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  14
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       447  1497 0A             OUTE:	LD A,(BC)
+       448  1498 D3 F4          	OUT 0F4H,A
+       449  149A 11 A4 14       	LD DE,OUT5
+       450  149D ED 53 34 A1    	LD (LOCA),DE
+       451  14A1 C3 0F 12       	JP WAITL
+       452  14A4 03             OUT5:	INC BC
+       453  14A5 3A 38 A1       	LD A,(COUNT)
+       454  14A8 3D             	DEC A
+       455  14A9 32 38 A1       	LD (COUNT),A
+       456  14AC FE 00          	CP 00H
+       457  14AE C2 97 14       	JP NZ,OUTE
+       458  14B1 3E 1B          	LD A,1BH	;PLACE CURSOR ON BLANK LINES FOR ENTRY.
+       459  14B3 D3 F4          	OUT 0F4H,A
+       460  14B5 11 BF 14       	LD DE,BAK1
+       461  14B8 ED 53 34 A1    	LD (LOCA),DE
+       462  14BC C3 0F 12       	JP WAITL
+       463  14BF 3E 47          BAK1:	LD A,47H
+       464  14C1 D3 F4          	OUT 0F4H,A
+       465  14C3 11 CD 14       	LD DE,BAK2
+       466  14C6 ED 53 34 A1    	LD (LOCA),DE
+       467  14CA C3 0F 12       	JP WAITL
+       468  14CD 3E 20          BAK2:	LD A,20H
+       469  14CF D3 F4          	OUT 0F4H,A
+       470  14D1 11 DB 14       	LD DE,MVIEWA
+       471  14D4 ED 53 34 A1    	LD (LOCA),DE
+       472  14D8 C3 0F 12       	JP WAITL
+       473  14DB 3E 32          MVIEWA:	LD A,32H
+       474  14DD D3 F4          	OUT 0F4H,A
+       475  14DF 11 E9 14       	LD DE,NDEL5
+       476  14E2 ED 53 34 A1    	LD (LOCA),DE
+       477  14E6 C3 0F 12       	JP WAITL
+       478  14E9 21 F2 14       NDEL5:  LD HL,MVIEWB	;WAIT FOR FIRST VALUE.
+       479  14EC 22 34 A1       	LD (LOCA),HL
+       480  14EF C3 58 14       	JP POLL
+       481  14F2 DB F4          MVIEWB:	IN A,0F4H
+       482  14F4 FE 18          	CP 18H		;SEE IF CANCELLING COMMAND.
+       483  14F6 CA 02 12       	JP Z,CLEAR
+       484  14F9 D3 F4          	OUT 0F4H,A
+       485  14FB CD F1 16       	CALL PROC	;CONVERT THE ASCII VALUE TO HEX AND
+       486  14FE CD 86 23       	CALL ROTL	;ROTATE FOUR PLACES TO LEFT.
+       487  1501 57             	LD D,A
+       488  1502 21 0F 15       NDEL8:	LD HL,MVIEWC	;SECOND VALUE.
+       489  1505 22 34 A1       	LD (LOCA),HL
+       490  1508 ED 53 0C A1    	LD (VAL3),DE
+       491  150C C3 58 14       	JP POLL
+       492  150F ED 5B 0C A1    MVIEWC:	LD DE,(VAL3)
+       493  1513 DB F4          	IN A,0F4H
+       494  1515 FE 18          	CP 18H
+       495  1517 CA 02 12       	JP Z,CLEAR
+       496  151A FE 7F          	CP 7FH		;CHECK IF CHANGING FIRST CHARACTER.
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  15
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       497  151C C2 35 15       	JP NZ,NDEL3
+       498  151F D3 F4          	OUT 0F4H,A
+       499  1521 21 2E 15       	LD HL,NDEL4
+       500  1524 22 34 A1       	LD (LOCA),HL
+       501  1527 ED 53 0C A1    	LD (VAL3),DE
+       502  152B C3 0F 12       	JP WAITL
+       503  152E ED 5B 0C A1    NDEL4:	LD DE,(VAL3)	;IF CHANGING FIRST VALUE THEN JUMP BACK.
+       504  1532 C3 E9 14       	JP NDEL5
+       505  1535 ED 53 10 A1    NDEL3:	LD (VAL4),DE
+       506  1539 D3 F4          	OUT 0F4H,A
+       507  153B CD F1 16       	CALL PROC
+       508  153E AA             	XOR D
+       509  153F 57             	LD D,A
+       510  1540 3A 08 A1       	LD A,(VAL2)	;CHECK IF IN PORT VIEW FUNCTION.
+       511  1543 CB 77          	BIT 6,A
+       512  1545 C2 82 1A       	JP NZ,PTVW2
+       513  1548 3A 08 A1       	LD A,(VAL2)
+       514  154B CB 6F          	BIT 5,A		;CHECK IF IN PORT CHANGE FUNCTION.
+       515  154D C2 C3 1C       	JP NZ,PTCHG1
+       516  1550 3A 50 A1       	LD A,(TOGV)
+       517  1553 CB 7F          	BIT 7,A
+       518  1555 C2 73 1F       	JP NZ,TOGG4
+       519  1558 21 65 15       NDELB:	LD HL,MVIEWD	;THIRD VALUE
+       520  155B 22 34 A1       	LD (LOCA),HL
+       521  155E ED 53 0C A1    	LD (VAL3),DE
+       522  1562 C3 58 14       	JP POLL
+       523  1565 ED 5B 0C A1    MVIEWD:	LD DE,(VAL3)
+       524  1569 DB F4          	IN A,0F4H
+       525  156B FE 18          	CP 18H
+       526  156D CA 02 12       	JP Z,CLEAR
+       527  1570 FE 7F          	CP 7FH		;CHECK IF CHANGING SECOND VALUE.
+       528  1572 C2 87 15       	JP NZ,NDEL6
+       529  1575 D3 F4          	OUT 0F4H,A
+       530  1577 21 80 15       	LD HL,NDEL7
+       531  157A 22 34 A1       	LD (LOCA),HL
+       532  157D C3 0F 12       	JP WAITL
+       533  1580 ED 5B 10 A1    NDEL7:	LD DE,(VAL4)
+       534  1584 C3 02 15       	JP NDEL8
+       535  1587 ED 53 14 A1    NDEL6:	LD (VAL5),DE
+       536  158B D3 F4          	OUT 0F4H,A
+       537  158D CD F1 16       	CALL PROC
+       538  1590 CD 86 23       	CALL ROTL	;ROTATE FOUR PLACES TO THE LEFT.
+       539  1593 5F             	LD E,A
+       540  1594 21 A1 15       	LD HL,MVIEWE	;FOURTH VALUE.
+       541  1597 22 34 A1       	LD (LOCA),HL
+       542  159A ED 53 0C A1    	LD (VAL3),DE
+       543  159E C3 58 14       	JP POLL
+       544  15A1 ED 5B 0C A1    MVIEWE:	LD DE,(VAL3)
+       545  15A5 DB F4          	IN A,0F4H
+       546  15A7 FE 18          	CP 18H
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  16
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       547  15A9 CA 02 12       	JP Z,CLEAR
+       548  15AC FE 7F          	CP 7FH
+       549  15AE C2 C3 15       	JP NZ,NDEL9
+       550  15B1 D3 F4          	OUT 0F4H,A
+       551  15B3 21 BC 15       	LD HL,NDELA
+       552  15B6 22 34 A1       	LD (LOCA),HL
+       553  15B9 C3 0F 12       	JP WAITL
+       554  15BC ED 5B 14 A1    NDELA:	LD DE,(VAL5)
+       555  15C0 C3 58 15       	JP NDELB
+       556  15C3 D3 F4          NDEL9:	OUT 0F4H,A
+       557  15C5 CD F1 16       	CALL PROC
+       558  15C8 AB             	XOR E
+       559  15C9 5F             	LD E,A
+       560  15CA ED 53 18 A1    	LD (VAL6),DE
+       561  15CE 1A             INCDCB:	LD A,(DE)
+       562  15CF 32 04 A1       	LD (VAL1),A
+       563  15D2 11 DC 15       	LD DE,MVIEWF
+       564  15D5 ED 53 34 A1    	LD (LOCA),DE
+       565  15D9 C3 0F 12       	JP WAITL
+       566  15DC ED 5B 0C A1    MVIEWF:	LD DE,(VAL3)
+       567  15E0 3A 08 A1       	LD A,(VAL2)	;CHECK IF IN CHANGE MEMORY FUNCTION.
+       568  15E3 CB 7F          	BIT 7,A
+       569  15E5 C2 72 17       	JP NZ,CHGVA
+       570  15E8 3E 1B          	LD A,1BH
+       571  15EA D3 F4          	OUT 0F4H,A
+       572  15EC 11 F6 15       	LD DE,BAK3
+       573  15EF ED 53 34 A1    	LD (LOCA),DE
+       574  15F3 C3 0F 12       	JP WAITL
+       575  15F6 3E 47          BAK3:	LD A,47H
+       576  15F8 D3 F4          	OUT 0F4H,A
+       577  15FA 11 04 16       	LD DE,BAK4
+       578  15FD ED 53 34 A1    	LD (LOCA),DE
+       579  1601 C3 0F 12       	JP WAITL
+       580  1604 3E 21          BAK4:	LD A,21H
+       581  1606 D3 F4          	OUT 0F4H,A
+       582  1608 11 12 16       	LD DE,MVIEWG
+       583  160B ED 53 34 A1    	LD (LOCA),DE
+       584  160F C3 0F 12       	JP WAITL
+       585  1612 3E 20          MVIEWG:	LD A,20H
+       586  1614 D3 F4          	OUT 0F4H,A
+       587  1616 11 20 16       	LD DE,MVIEWH
+       588  1619 ED 53 34 A1    	LD (LOCA),DE
+       589  161D C3 0F 12       	JP WAITL
+       590  1620 01 E7 22       MVIEWH:	LD BC,MEMIS	;MESSAGE TELLING THE CONTENTS.
+       591  1623 3E 0D          	LD A,0DH
+       592  1625 32 38 A1       	LD (COUNT),A
+       593  1628 0A             OUTF:	LD A,(BC)
+       594  1629 D3 F4          	OUT 0F4H,A
+       595  162B 11 35 16       	LD DE,OUT6
+       596  162E ED 53 34 A1    	LD (LOCA),DE
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  17
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       597  1632 C3 0F 12       	JP WAITL
+       598  1635 03             OUT6:	INC BC
+       599  1636 3A 38 A1       	LD A,(COUNT)
+       600  1639 3D             	DEC A
+       601  163A 32 38 A1       	LD (COUNT),A
+       602  163D FE 00          	CP 00H
+       603  163F C2 28 16       	JP NZ,OUTF
+       604  1642 3A 04 A1       CHGVB:	LD A,(VAL1)	;OUTPUT THE CONTENTS OF REQUESTED LOCATION
+       605  1645 47             	LD B,A		;IN ASCII.  NEXT SEVERAL STEPS CONVERT TO
+       606  1646 E6 80          	AND 80H		;ASCII AND OUTPUT THE VALUE.
+       607  1648 CA 54 16       	JP Z,ADDLO
+       608  164B 78             	LD A,B
+       609  164C E6 60          	AND 60H
+       610  164E CA 54 16       	JP Z,ADDLO
+       611  1651 C3 6B 16       	JP ADDH1
+       612  1654 78             ADDLO:	LD A,B
+       613  1655 E6 F0          	AND 0F0H
+       614  1657 CD 81 23       	CALL ROTR	;ROTATE FOUR PLACES TO THE RIGHT.
+       615  165A C6 30          	ADD A,30H
+       616  165C D3 F4          	OUT 0F4H,A
+       617  165E 11 68 16       	LD DE,MVIEWI
+       618  1661 ED 53 34 A1    	LD (LOCA),DE
+       619  1665 C3 0F 12       	JP WAITL
+       620  1668 C3 80 16       MVIEWI:	JP SECD
+       621  166B 78             ADDH1:	LD A,B
+       622  166C E6 F0          	AND 0F0H
+       623  166E CD 81 23       	CALL ROTR	;ROTATE FOUR PLACES TO THE RIGHT.
+       624  1671 C6 37          	ADD A,37H
+       625  1673 D3 F4          	OUT 0F4H,A
+       626  1675 11 7F 16       	LD DE,MVIEWJ
+       627  1678 ED 53 34 A1    	LD (LOCA),DE
+       628  167C C3 0F 12       	JP WAITL
+       629  167F 00             MVIEWJ:	NOP
+       630  1680 78             SECD:	LD A,B
+       631  1681 E6 0F          	AND 0FH
+       632  1683 CD 86 23       	CALL ROTL	;ROTATE FOUR PLACES TO THE LEFT.
+       633  1686 47             	LD B,A
+       634  1687 E6 80          	AND 80H
+       635  1689 CA 95 16       	JP Z,ADDL1
+       636  168C 78             	LD A,B
+       637  168D E6 60          	AND 60H
+       638  168F CA 95 16       	JP Z,ADDL1
+       639  1692 C3 AA 16       	JP ADDH2
+       640  1695 78             ADDL1:	LD A,B
+       641  1696 CD 81 23       	CALL ROTR	;ROTATE FOUR PLACES TO THE RIGHT.
+       642  1699 C6 30          	ADD A,30H
+       643  169B D3 F4          	OUT 0F4H,A
+       644  169D 11 A7 16       	LD DE,MVIEWK
+       645  16A0 ED 53 34 A1    	LD (LOCA),DE
+       646  16A4 C3 0F 12       	JP WAITL
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  18
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       647  16A7 C3 BD 16       MVIEWK:	JP OUTEN
+       648  16AA 78             ADDH2:	LD A,B
+       649  16AB CD 81 23       	CALL ROTR	;ROTATE FOUR PLACES TO THE RIGHT.
+       650  16AE C6 37          	ADD A,37H
+       651  16B0 D3 F4          	OUT 0F4H,A
+       652  16B2 11 BC 16       	LD DE,MVIEWL
+       653  16B5 ED 53 34 A1    	LD (LOCA),DE
+       654  16B9 C3 0F 12       	JP WAITL
+       655  16BC 00             MVIEWL:	NOP
+       656  16BD 3A 08 A1       OUTEN:	LD A,(VAL2)	
+       657  16C0 CB 7F          	BIT 7,A		;CHECK IF IN CHANGE MEMORY MODE.
+       658  16C2 C2 CF 17       	JP NZ,CHGVC
+       659  16C5 3A 08 A1       	LD A,(VAL2)
+       660  16C8 CB 77          	BIT 6,A		;CHECK IF IN VIEW PORT MODE.
+       661  16CA C2 BF 1A       	JP NZ,PTVW3
+       662  16CD 3A 08 A1       	LD A,(VAL2)
+       663  16D0 CB 6F          	BIT 5,A		;CHECK IF IN PORT CHANGE MODE.
+       664  16D2 C2 CF 17       	JP NZ,CHGVC
+       665  16D5 21 E2 16       	LD HL,MVIEWM	;CLEAR SCREEN WHEN NEXT KEY IS PRESSED
+       666  16D8 22 34 A1       	LD (LOCA),HL
+       667  16DB 3E 48          	LD A,48H
+       668  16DD D3 F4          	OUT 0F4H,A
+       669  16DF C3 58 14       	JP POLL
+       670  16E2 DB F4          MVIEWM:	IN A,0F4H
+       671  16E4 FE 68          	CP 68H		;CHECK IF NEXT LOCATION REQUEST.
+       672  16E6 CA 75 1D       	JP Z,INC1
+       673  16E9 FE 67          	CP 67H		;CHECK IF PREVIOUS LOCATION REQUEST.
+       674  16EB CA 7F 1D       	JP Z,DEC1
+       675  16EE C3 02 12       	JP CLEAR	;CLEAR IF NO FURTHER PROCESS AND RETURN.
+       676  16F1
+       677  16F1
+       678  16F1                	
+       679  16F1 47             PROC:	LD B,A
+       680  16F2 E6 40          	AND 40H		;SEE IF VALUE IS NUMBER OR LETTER.
+       681  16F4 CA FB 16       	JP Z,UNDER
+       682  16F7 78             	LD A,B
+       683  16F8 D6 37          	SUB 37H		;CONVERT ASCII LETTER TO HEX.
+       684  16FA C9             	RET
+       685  16FB 78             UNDER:	LD A,B
+       686  16FC D6 30          	SUB 30H		;CONVERT ASCII NUMBER TO HEX.
+       687  16FE C9             	RET
+       688  16FF
+       689  16FF 3E 0C          CHVAL:	LD A,0CH	;CLEAR SCREEN BEFORE CHANGE MEMORY FUNCTION.
+       690  1701 D3 F4          	OUT 0F4H,A
+       691  1703 11 0D 17       	LD DE,CHVAL0
+       692  1706 ED 53 34 A1    	LD (LOCA),DE
+       693  170A C3 0F 12       	JP WAITL
+       694  170D
+       695  170D
+       696  170D 01 F4 22       CHVAL0:	LD BC,F4MES	;PRINT THE MEMORY LOCATION REQUEST MESSAGE.
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  19
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       697  1710 3E 17          	LD A,17H
+       698  1712 32 38 A1       	LD (COUNT),A
+       699  1715 0A             OUTG:	LD A,(BC)
+       700  1716 D3 F4          	OUT 0F4H,A
+       701  1718 11 22 17       	LD DE,OUT10
+       702  171B ED 53 34 A1    	LD (LOCA),DE
+       703  171F C3 0F 12       	JP WAITL
+       704  1722 03             OUT10: 	INC BC
+       705  1723 3A 38 A1       	LD A,(COUNT)
+       706  1726 3D             	DEC A
+       707  1727 32 38 A1       	LD (COUNT),A
+       708  172A FE 00          	CP 00H
+       709  172C C2 15 17       	JP NZ,OUTG
+       710  172F 3E 1B          	LD A,1BH
+       711  1731 D3 F4          	OUT 0F4H,A
+       712  1733 11 3D 17       	LD DE,BAK5
+       713  1736 ED 53 34 A1    	LD (LOCA),DE
+       714  173A C3 0F 12       	JP WAITL
+       715  173D 3E 47          BAK5:	LD A,47H
+       716  173F D3 F4          	OUT 0F4H,A
+       717  1741 11 4B 17       	LD DE,BAK6
+       718  1744 ED 53 34 A1    	LD (LOCA),DE
+       719  1748 C3 0F 12       	JP WAITL
+       720  174B 3E 20          BAK6:	LD A,20H
+       721  174D D3 F4          	OUT 0F4H,A
+       722  174F 11 59 17       	LD DE,CHGV1
+       723  1752 ED 53 34 A1    	LD (LOCA),DE
+       724  1756 C3 0F 12       	JP WAITL
+       725  1759 3E 32          CHGV1:	LD A,32H
+       726  175B D3 F4          	OUT 0F4H,A
+       727  175D 11 67 17       	LD DE,V1CHG
+       728  1760 ED 53 34 A1    	LD (LOCA),DE
+       729  1764 C3 0F 12       	JP WAITL
+       730  1767 3A 08 A1       V1CHG:	LD A,(VAL2)	;SET THE CHANGE MEMORY FUNCTION BIT.
+       731  176A CB FF          	SET 7,A
+       732  176C 32 08 A1       	LD (VAL2),A
+       733  176F C3 E9 14       	JP NDEL5	;JUMP TO READ IN THE MEMORY LOCATION TO CHANGE.
+       734  1772
+       735  1772 3E 1B          CHGVA:	LD A,1BH
+       736  1774 D3 F4          	OUT 0F4H,A
+       737  1776 11 80 17       	LD DE,BAK7
+       738  1779 ED 53 34 A1    	LD (LOCA),DE
+       739  177D C3 0F 12       	JP WAITL
+       740  1780 3E 47          BAK7:	LD A,47H
+       741  1782 D3 F4          	OUT 0F4H,A
+       742  1784 11 8E 17       	LD DE,BAK8
+       743  1787 ED 53 34 A1    	LD (LOCA),DE
+       744  178B C3 0F 12       	JP WAITL
+       745  178E 3E 21          BAK8:	LD A,21H
+       746  1790 D3 F4          	OUT 0F4H,A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  20
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       747  1792 11 9C 17       	LD DE,CHGV2
+       748  1795 ED 53 34 A1    	LD (LOCA),DE
+       749  1799 C3 0F 12       	JP WAITL
+       750  179C 3E 20          CHGV2:	LD A,20H
+       751  179E D3 F4          	OUT 0F4H,A
+       752  17A0 11 AA 17       	LD DE,CHGV3
+       753  17A3 ED 53 34 A1    	LD (LOCA),DE
+       754  17A7 C3 0F 12       	JP WAITL
+       755  17AA 01 0B 23       CHGV3:	LD BC,CUMES	;PRINT THE CURRENTLY MESSAGE.
+       756  17AD 3E 0A          	LD A,0AH
+       757  17AF 32 38 A1       	LD (COUNT),A
+       758  17B2 0A             OUTH:	LD A,(BC)
+       759  17B3 D3 F4          	OUT 0F4H,A
+       760  17B5 11 BF 17       	LD DE,OUT11
+       761  17B8 ED 53 34 A1    	LD (LOCA),DE
+       762  17BC C3 0F 12       	JP WAITL
+       763  17BF 03             OUT11: 	INC BC
+       764  17C0 3A 38 A1       	LD A,(COUNT)
+       765  17C3 3D             	DEC A
+       766  17C4 32 38 A1       	LD (COUNT),A
+       767  17C7 FE 00          	CP 00H
+       768  17C9 C2 B2 17       	JP NZ,OUTH
+       769  17CC C3 42 16       	JP CHGVB	;JUMP TO OUTPUT THE CURRENT VALUE OF THE LOCATION.
+       770  17CF
+       771  17CF 01 15 23       CHGVC:	LD BC,NWMES	;OUTPUT THE MESSAGE REQUESTING THE NEW VALUE.
+       772  17D2 3E 0A          	LD A,0AH
+       773  17D4 32 38 A1       	LD (COUNT),A
+       774  17D7 0A             OUT12:	LD A,(BC)
+       775  17D8 D3 F4          	OUT 0F4H,A
+       776  17DA 11 E4 17       	LD DE,OUTI
+       777  17DD ED 53 34 A1    	LD (LOCA),DE
+       778  17E1 C3 0F 12       	JP WAITL
+       779  17E4 03             OUTI:	INC BC
+       780  17E5 3A 38 A1       	LD A,(COUNT)
+       781  17E8 3D             	DEC A
+       782  17E9 32 38 A1       	LD (COUNT),A
+       783  17EC FE 00          	CP 00H
+       784  17EE C2 D7 17       	JP NZ,OUT12
+       785  17F1 3E 1B          	LD A,1BH	;MOVE CURSOR TO INPUT THE NEW VALUE.
+       786  17F3 D3 F4          	OUT 0F4H,A
+       787  17F5 11 FF 17       	LD DE,BAK9
+       788  17F8 ED 53 34 A1    	LD (LOCA),DE
+       789  17FC C3 0F 12       	JP WAITL
+       790  17FF 3E 47          BAK9:	LD A,47H
+       791  1801 D3 F4          	OUT 0F4H,A
+       792  1803 11 0D 18       	LD DE,BAK10
+       793  1806 ED 53 34 A1    	LD (LOCA),DE
+       794  180A C3 0F 12       	JP WAITL
+       795  180D 3E 21          BAK10:	LD A,21H
+       796  180F D3 F4          	OUT 0F4H,A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  21
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       797  1811 11 1B 18       	LD DE,CHGV6
+       798  1814 ED 53 34 A1    	LD (LOCA),DE
+       799  1818 C3 0F 12       	JP WAITL
+       800  181B 3E 33          CHGV6:	LD A,33H
+       801  181D D3 F4          	OUT 0F4H,A
+       802  181F 11 29 18       	LD DE,CHGV7
+       803  1822 ED 53 34 A1    	LD (LOCA),DE
+       804  1826 C3 0F 12       	JP WAITL
+       805  1829 11 33 18       CHGV7:	LD DE,CHGV8	;FIRST VALUE
+       806  182C ED 53 34 A1    	LD (LOCA),DE
+       807  1830 C3 58 14       	JP POLL
+       808  1833 DB F4          CHGV8:	IN A,0F4H
+       809  1835 FE 18          	CP 18H
+       810  1837 CA 02 12       	JP Z,CLEAR
+       811  183A D3 F4          	OUT 0F4H,A
+       812  183C CD F1 16       	CALL PROC
+       813  183F CD 86 23       	CALL ROTL
+       814  1842 57             	LD D,A
+       815  1843 21 50 18       	LD HL,NVALA	;SECOND VALUE
+       816  1846 22 34 A1       	LD (LOCA),HL
+       817  1849 ED 53 0C A1    	LD (VAL3),DE
+       818  184D C3 58 14       	JP POLL
+       819  1850 ED 5B 0C A1    NVALA:	LD DE,(VAL3)
+       820  1854 DB F4          	IN A,0F4H
+       821  1856 FE 18          	CP 18H
+       822  1858 CA 02 12       	JP Z,CLEAR
+       823  185B FE 7F          	CP 7FH		;CHECK IF CHANGING THE FIRST VALUE.
+       824  185D C2 76 18       	JP NZ,NVAL1
+       825  1860 D3 F4          	OUT 0F4H,A
+       826  1862 21 6F 18       	LD HL,NVALB
+       827  1865 22 34 A1       	LD (LOCA),HL
+       828  1868 ED 53 0C A1    	LD (VAL3),DE
+       829  186C C3 0F 12       	JP WAITL
+       830  186F ED 5B 0C A1    NVALB:	LD DE,(VAL3)
+       831  1873 C3 29 18       	JP CHGV7
+       832  1876 D3 F4          NVAL1:	OUT 0F4H,A
+       833  1878 CD F1 16       	CALL PROC
+       834  187B AA             	XOR D
+       835  187C 57             	LD D,A
+       836  187D 3A 08 A1       	LD A,(VAL2)	;SEE IF IN CHANGE PORT VALUE MODE.
+       837  1880 CB 6F          	BIT 5,A
+       838  1882 C2 2D 1D       	JP NZ,PTCHG4
+       839  1885 2A 18 A1       	LD HL,(VAL6)	;PLACE THE LOCATION TO CHANGE IN HL.
+       840  1888 72             	LD (HL),D	;PLACE THE NEW VALUE IN THE MEMORY LOCATION.
+       841  1889 3E 1B          	LD A,1BH
+       842  188B D3 F4          	OUT 0F4H,A
+       843  188D 11 97 18       	LD DE,BAK11
+       844  1890 ED 53 34 A1    	LD (LOCA),DE
+       845  1894 C3 0F 12       	JP WAITL
+       846  1897 3E 47          BAK11:	LD A,47H
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  22
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       847  1899 D3 F4          	OUT 0F4H,A
+       848  189B 11 A5 18       	LD DE,BAK12
+       849  189E ED 53 34 A1    	LD (LOCA),DE
+       850  18A2 C3 0F 12       	JP WAITL
+       851  18A5 3E 21          BAK12:	LD A,21H
+       852  18A7 D3 F4          	OUT 0F4H,A
+       853  18A9 11 B3 18       	LD DE,NV1
+       854  18AC ED 53 34 A1    	LD (LOCA),DE
+       855  18B0 C3 0F 12       	JP WAITL
+       856  18B3 3E 36          NV1:	LD A,36H
+       857  18B5 D3 F4          	OUT 0F4H,A
+       858  18B7 11 C1 18       	LD DE,NV2
+       859  18BA ED 53 34 A1    	LD (LOCA),DE
+       860  18BE C3 0F 12       	JP WAITL
+       861  18C1 11 CB 18       NV2:	LD DE,NV3
+       862  18C4 ED 53 34 A1    	LD (LOCA),DE
+       863  18C8 C3 58 14       	JP POLL
+       864  18CB DB F4          NV3:	IN A,0F4H	;CHECK IF NEXT LOCATION REQUEST.
+       865  18CD FE 68          	CP 68H
+       866  18CF CA 75 1D       	JP Z,INC1
+       867  18D2 FE 67          	CP 67H		;CHECK IF PREVIOUS LOCATION REQUEST.
+       868  18D4 CA 7F 1D       	JP Z,DEC1
+       869  18D7 C3 02 12       	JP CLEAR	;CLEAR FUNCTION AND RETURN.
+       870  18DA
+       871  18DA                	
+       872  18DA 3A 28 A1       PRTT5:  LD A,(VAL10)	;LOAD THE BITS TO CHECK WHICH KEY IS NEXT TO PROGRAM
+       873  18DD FE 00          	CP 00H		;CHECK IF THE ROUTINE IS JUST BEING ENTERED INTO.
+       874  18DF CA 51 19       	JP Z,PRWAIT	;ROUTINE TO DISPLAY THE WAIT MESSAGE
+       875  18E2 FE 01          	CP 01H		;CHECK IF READY TO PROGRAM THE FIRST FUNCTION KEY
+       876  18E4 CA 64 19       	JP Z,PRF1	;ROUTINE LOAD THE COUNT AND VALUES FOR THE F1 KEY
+       877  18E7 FE 03          	CP 03H		;CHECK IF READY TO PROGRAM THE SECOND FUNCTION KEY
+       878  18E9 CA 77 19       	JP Z,PRF2	;ROUTINE TO LOAD THE COUNT AND VALUES FOR THE F2 KEY
+       879  18EC FE 07          	CP 07H		;CHECK IF READY TO PROGRAM THE THIRD FUNCTION KEY
+       880  18EE CA 8A 19       	JP Z,PRF3	;ROUTINE TO LOAD THE COUNT AND VALUES FOR THE F3 KEY
+       881  18F1 FE 0F          	CP 0FH		;CHECK IF READY FOR THE FOURTH FUNCTION KEY
+       882  18F3 CA 9D 19       	JP Z,PRF4	;ROUTINE FOR THE FOURTH KEY
+       883  18F6 FE 1F          	CP 1FH		;CHECK IF READY FOR THE FIFTH KEY
+       884  18F8 CA B0 19       	JP Z,PRF5	;ROUTINE FOR THE FIFTH KEY
+       885  18FB FE 3F          	CP 3FH		;CHECK IF READY FOR THE SIXTH KEY
+       886  18FD CA C3 19       	JP Z,PRF6	;ROUTINE FOR THE SIXTH KEY
+       887  1900 FE 7F          	CP 7FH		;CHECK IF READY FOR THE SEVENTH KEY
+       888  1902 CA D6 19       	JP Z,PRF7	;ROUTINE FOR THE SEVENTH KEY
+       889  1905 FE FF          	CP 0FFH		;CHECK IF READY FOR THE EIGHTH KEY
+       890  1907 CA E9 19       	JP Z,PRF8	;ROUTINE FOR THE EIGHTH KEY
+       891  190A FE F0          	CP 0F0H		;CHECK IF ALL KEYS HAVE BEEN PROGRAMED.
+       892  190C CA FC 19       	JP Z,FINISH	;ROUTINE TO DISPLAY THE READY MESSAGE AND TONE.
+       893  190F 11 02 12       	LD DE,CLEAR
+       894  1912 ED 53 34 A1    	LD (LOCA),DE
+       895  1916 3E 00          	LD A,00H	;CLEAR THE FUNCTION KEY REGISTER.
+       896  1918 32 28 A1       	LD  (VAL10),A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  23
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       897  191B C3 58 14       	JP POLL		;CLEAR THE SCREEN WHEN THE NEXT BUTTON IS PUSHED.
+       898  191E
+       899  191E
+       900  191E ED 5B 1C A1    PRBAK:	LD DE,(VAL7)
+       901  1922 1A             	LD A,(DE)
+       902  1923 D3 F4          	OUT 0F4H,A	;OUTPUT THE STRING OF VALUES TO PROGRAM THE TT5.
+       903  1925 13             	INC DE
+       904  1926 3A 38 A1       	LD A,(COUNT)
+       905  1929 3D             	DEC A
+       906  192A 32 38 A1       	LD (COUNT),A
+       907  192D FE 00          	CP 00
+       908  192F CA DA 18       	JP Z,PRTT5
+       909  1932 ED 53 1C A1    	LD (VAL7),DE
+       910  1936 CD 3C 19       	CALL DELAY
+       911  1939 C3 1E 19       	JP PRBAK
+       912  193C
+       913  193C 21 FF 01       DELAY:	LD HL,01FFH
+       914  193F 2B             TT5WAIT:DEC HL
+       915  1940 DD E3          	EX (SP),IX
+       916  1942 DD E3          	EX (SP),IX
+       917  1944 7C             	LD A,H
+       918  1945 FE 00          	CP 00H
+       919  1947 C2 3F 19       	JP NZ,TT5WAIT
+       920  194A 7D             	LD A,L
+       921  194B FE 00          	CP 00H
+       922  194D C2 3F 19       	JP NZ,TT5WAIT
+       923  1950 C9             	RET
+       924  1951
+       925  1951
+       926  1951
+       927  1951 3E 05          PRWAIT: LD A,05H
+       928  1953 32 38 A1       	LD (COUNT),A
+       929  1956 21 16 21       	LD HL,PRDAT
+       930  1959 22 1C A1       	LD (VAL7),HL
+       931  195C 3E 01          	LD A,01H
+       932  195E 32 28 A1       	LD (VAL10),A
+       933  1961 C3 1E 19       	JP PRBAK
+       934  1964
+       935  1964 3E 08          PRF1:	LD A,08H
+       936  1966 32 38 A1       	LD (COUNT),A
+       937  1969 21 1B 21       	LD HL,F1DAT
+       938  196C 22 1C A1       	LD (VAL7),HL
+       939  196F 3E 03          	LD A,03H
+       940  1971 32 28 A1       	LD (VAL10),A
+       941  1974 C3 1E 19       	JP PRBAK
+       942  1977
+       943  1977 3E 08          PRF2:	LD A,08H
+       944  1979 32 38 A1       	LD (COUNT),A
+       945  197C 21 23 21       	LD HL,F2DAT
+       946  197F 22 1C A1       	LD (VAL7),HL
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  24
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       947  1982 3E 07          	LD A,07H
+       948  1984 32 28 A1       	LD (VAL10),A
+       949  1987 C3 1E 19       	JP PRBAK
+       950  198A
+       951  198A 3E 08          PRF3:	LD A,08H
+       952  198C 32 38 A1       	LD (COUNT),A
+       953  198F 21 2B 21       	LD HL,F3DAT
+       954  1992 22 1C A1       	LD (VAL7),HL
+       955  1995 3E 0F          	LD A,0FH
+       956  1997 32 28 A1       	LD (VAL10),A
+       957  199A C3 1E 19       	JP PRBAK
+       958  199D
+       959  199D 3E 08          PRF4:	LD A,08H
+       960  199F 32 38 A1       	LD (COUNT),A
+       961  19A2 21 33 21       	LD HL,F4DAT
+       962  19A5 22 1C A1       	LD (VAL7),HL
+       963  19A8 3E 1F          	LD A,1FH
+       964  19AA 32 28 A1       	LD (VAL10),A
+       965  19AD C3 1E 19       	JP PRBAK
+       966  19B0
+       967  19B0 3E 08          PRF5:	LD A,08H
+       968  19B2 32 38 A1       	LD (COUNT),A
+       969  19B5 21 3B 21       	LD HL,F5DAT
+       970  19B8 22 1C A1       	LD (VAL7),HL
+       971  19BB 3E 3F          	LD A,3FH
+       972  19BD 32 28 A1       	LD (VAL10),A
+       973  19C0 C3 1E 19       	JP PRBAK
+       974  19C3
+       975  19C3 3E 08          PRF6:	LD A,08H
+       976  19C5 32 38 A1       	LD (COUNT),A
+       977  19C8 21 43 21       	LD HL,F6DAT
+       978  19CB 22 1C A1       	LD (VAL7),HL
+       979  19CE 3E 7F          	LD A,7FH
+       980  19D0 32 28 A1       	LD (VAL10),A
+       981  19D3 C3 1E 19       	JP PRBAK
+       982  19D6
+       983  19D6 3E 08          PRF7:	LD A,08H
+       984  19D8 32 38 A1       	LD (COUNT),A
+       985  19DB 21 4B 21       	LD HL,F7DAT
+       986  19DE 22 1C A1       	LD (VAL7),HL
+       987  19E1 3E FF          	LD A,0FFH
+       988  19E3 32 28 A1       	LD (VAL10),A
+       989  19E6 C3 1E 19       	JP PRBAK
+       990  19E9
+       991  19E9 3E 08          PRF8:	LD A,08H
+       992  19EB 32 38 A1       	LD (COUNT),A
+       993  19EE 21 53 21       	LD HL,F8DAT
+       994  19F1 22 1C A1       	LD (VAL7),HL
+       995  19F4 3E F0          	LD A,0F0H
+       996  19F6 32 28 A1       	LD (VAL10),A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  25
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       997  19F9 C3 1E 19       	JP PRBAK
+       998  19FC
+       999  19FC 3E 07          FINISH:	LD A,07H
+      1000  19FE 32 38 A1       	LD (COUNT),A
+      1001  1A01 21 5B 21       	LD HL,DATPR
+      1002  1A04 22 1C A1       	LD (VAL7),HL
+      1003  1A07 3E 55          	LD A,55H
+      1004  1A09 32 28 A1       	LD (VAL10),A
+      1005  1A0C C3 1E 19       	JP PRBAK
+      1006  1A0F
+      1007  1A0F
+      1008  1A0F 3E 0C          PTVIEW:	LD A,0CH
+      1009  1A11 D3 F4          	OUT 0F4H,A
+      1010  1A13 11 1D 1A       	LD DE,VIEWPT
+      1011  1A16 ED 53 34 A1    	LD (LOCA),DE
+      1012  1A1A C3 0F 12       	JP WAITL
+      1013  1A1D
+      1014  1A1D 01 1F 23       VIEWPT:	LD BC,PRTVW	;OUTPUT THE PORT VIEW MESSAGE.
+      1015  1A20 3E 17          	LD A,17H
+      1016  1A22 32 38 A1       	LD (COUNT),A
+      1017  1A25 0A             OUTPA:	LD A,(BC)
+      1018  1A26 D3 F4          	OUT 0F4H,A
+      1019  1A28 11 32 1A       	LD DE,OUTPB
+      1020  1A2B ED 53 34 A1    	LD (LOCA),DE
+      1021  1A2F C3 0F 12       	JP WAITL
+      1022  1A32 03             OUTPB:	INC BC
+      1023  1A33 3A 38 A1       	LD A,(COUNT)
+      1024  1A36 3D             	DEC A
+      1025  1A37 32 38 A1       	LD (COUNT),A
+      1026  1A3A FE 00          	CP 00H
+      1027  1A3C C2 25 1A       	JP NZ,OUTPA
+      1028  1A3F 3E 1B          	LD A,1BH
+      1029  1A41 D3 F4          	OUT 0F4H,A
+      1030  1A43 11 4D 1A       	LD DE,BAK13
+      1031  1A46 ED 53 34 A1    	LD (LOCA),DE
+      1032  1A4A C3 0F 12       	JP WAITL
+      1033  1A4D 3E 47          BAK13:	LD A,47H
+      1034  1A4F D3 F4          	OUT 0F4H,A
+      1035  1A51 11 5B 1A       	LD DE,BAK14
+      1036  1A54 ED 53 34 A1    	LD (LOCA),DE
+      1037  1A58 C3 0F 12       	JP WAITL
+      1038  1A5B 3E 20          BAK14:	LD A,20H
+      1039  1A5D D3 F4          	OUT 0F4H,A
+      1040  1A5F 11 69 1A       	LD DE,OUTPC
+      1041  1A62 ED 53 34 A1    	LD (LOCA),DE
+      1042  1A66 C3 0F 12       	JP WAITL
+      1043  1A69 3E 34          OUTPC:	LD A,34H
+      1044  1A6B D3 F4          	OUT 0F4H,A
+      1045  1A6D 11 77 1A       	LD DE,OUTPD
+      1046  1A70 ED 53 34 A1    	LD (LOCA),DE
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  26
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1047  1A74 C3 0F 12       	JP WAITL
+      1048  1A77 3A 08 A1       OUTPD:	LD A,(VAL2)	;SET THE PORT VIEW BIT IN MEMORY.
+      1049  1A7A CB F7          	SET 6,A
+      1050  1A7C 32 08 A1       	LD (VAL2),A
+      1051  1A7F C3 E9 14       	JP NDEL5	;JUMP TO READ IN THE PORT LOCATION TO VIEW.
+      1052  1A82
+      1053  1A82 3A 08 A1       PTVW2:	LD A,(VAL2)
+      1054  1A85 CB E7          	SET 4,A
+      1055  1A87 32 08 A1       	LD (VAL2),A
+      1056  1A8A 7A             	LD A,D
+      1057  1A8B 32 44 A1       	LD (PORV),A	;STORE THE PORT LOCATION IN MEMORY.
+      1058  1A8E 01 36 23       	LD BC,PRVAL	;OUTPUT THE VALUE MESSAGE.
+      1059  1A91 3E 08          	LD A,08H
+      1060  1A93 32 38 A1       	LD (COUNT),A
+      1061  1A96 0A             PTVW2A:	LD A,(BC)
+      1062  1A97 D3 F4          	OUT 0F4H,A
+      1063  1A99 11 A3 1A       	LD DE,PTVW2B
+      1064  1A9C ED 53 34 A1    	LD (LOCA),DE
+      1065  1AA0 C3 0F 12       	JP WAITL
+      1066  1AA3 03             PTVW2B:	INC BC
+      1067  1AA4 3A 38 A1       	LD A,(COUNT)
+      1068  1AA7 3D             	DEC A
+      1069  1AA8 32 38 A1       	LD (COUNT),A
+      1070  1AAB FE 00          	CP 00H
+      1071  1AAD C2 96 1A       	JP NZ,PTVW2A
+      1072  1AB0 3A 44 A1       	LD A,(PORV)
+      1073  1AB3 4F             	LD C,A
+      1074  1AB4 ED 78          	IN A,(C)	;READ IN THE VALUE OF THE PORT LOCATION.
+      1075  1AB6 32 04 A1       	LD (VAL1),A
+      1076  1AB9 32 40 A1       	LD (BITV),A
+      1077  1ABC C3 42 16       	JP CHGVB	;JUMP TO CHANGE THE VALUE TO ASCII AND OUTPUT.
+      1078  1ABF                			
+      1079  1ABF 01 3E 23       PTVW3:	LD BC,ORMES	;DISPLAY THE OR MESSAGE BEFORE THE BINARY VALUE.
+      1080  1AC2 3E 07          	LD A,07H
+      1081  1AC4 32 38 A1       	LD (COUNT),A
+      1082  1AC7 0A             PTVW3A:	LD A,(BC)
+      1083  1AC8 D3 F4          	OUT 0F4H,A
+      1084  1ACA 11 D4 1A       	LD DE,PTVW3B
+      1085  1ACD ED 53 34 A1    	LD (LOCA),DE
+      1086  1AD1 C3 0F 12       	JP WAITL
+      1087  1AD4 03             PTVW3B:	INC BC
+      1088  1AD5 3A 38 A1       	LD A,(COUNT)
+      1089  1AD8 3D             	DEC A
+      1090  1AD9 32 38 A1       	LD (COUNT),A
+      1091  1ADC FE 00          	CP 00H
+      1092  1ADE C2 C7 1A       	JP NZ,PTVW3A
+      1093  1AE1 3A 40 A1       TOGG6:	LD A,(BITV)
+      1094  1AE4 CB 7F          	BIT 7,A		;START CHECKING EACH BIT OF THE VALUE AND DISPLAYING
+      1095  1AE6 CA EF 1A       	JP Z,ZERO1	;THE ONE OR ZERO IN ASCII.
+      1096  1AE9 CD 90 23       	CALL ONEOUT
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  27
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1097  1AEC C3 F2 1A       	JP BIT7
+      1098  1AEF CD 8B 23       ZERO1:	CALL ZEROUT
+      1099  1AF2 11 FC 1A       BIT7:	LD DE,BITA
+      1100  1AF5 ED 53 34 A1    	LD (LOCA),DE
+      1101  1AF9 C3 0F 12       	JP WAITL
+      1102  1AFC 3A 40 A1       BITA:	LD A,(BITV)
+      1103  1AFF CB 77          	BIT 6,A		;            "  "
+      1104  1B01 CA 0A 1B       	JP Z,ZERO2		
+      1105  1B04 CD 90 23       	CALL ONEOUT
+      1106  1B07 C3 0D 1B       	JP BIT6
+      1107  1B0A CD 8B 23       ZERO2:	CALL ZEROUT
+      1108  1B0D 11 17 1B       BIT6:	LD DE,BITB
+      1109  1B10 ED 53 34 A1    	LD (LOCA),DE
+      1110  1B14 C3 0F 12       	JP WAITL
+      1111  1B17 3A 40 A1       BITB:	LD A,(BITV)
+      1112  1B1A CB 6F          	BIT 5,A		;            "  "
+      1113  1B1C CA 25 1B       	JP Z,ZERO3
+      1114  1B1F CD 90 23       	CALL ONEOUT
+      1115  1B22 C3 28 1B       	JP BIT5
+      1116  1B25 CD 8B 23       ZERO3:	CALL ZEROUT
+      1117  1B28 11 32 1B       BIT5:	LD DE,BITC
+      1118  1B2B ED 53 34 A1    	LD (LOCA),DE
+      1119  1B2F C3 0F 12       	JP WAITL
+      1120  1B32 3A 40 A1       BITC:	LD A,(BITV)
+      1121  1B35 CB 67          	BIT 4,A		;            "  "
+      1122  1B37 CA 40 1B       	JP Z,ZERO4
+      1123  1B3A CD 90 23       	CALL ONEOUT
+      1124  1B3D C3 43 1B       	JP BIT4
+      1125  1B40 CD 8B 23       ZERO4:	CALL ZEROUT
+      1126  1B43 11 4D 1B       BIT4:	LD DE,BITD
+      1127  1B46 ED 53 34 A1    	LD (LOCA),DE
+      1128  1B4A C3 0F 12       	JP WAITL
+      1129  1B4D 3A 40 A1       BITD:	LD A,(BITV)
+      1130  1B50 CB 5F          	BIT 3,A		;            "  "
+      1131  1B52 CA 5B 1B       	JP Z,ZERO5
+      1132  1B55 CD 90 23       	CALL ONEOUT
+      1133  1B58 C3 5E 1B       	JP BIT3
+      1134  1B5B CD 8B 23       ZERO5:	CALL ZEROUT
+      1135  1B5E 11 68 1B       BIT3:	LD DE,BITE
+      1136  1B61 ED 53 34 A1    	LD (LOCA),DE
+      1137  1B65 C3 0F 12       	JP WAITL
+      1138  1B68 3A 40 A1       BITE:	LD A,(BITV)
+      1139  1B6B CB 57          	BIT 2,A		;            "  "
+      1140  1B6D CA 76 1B       	JP Z,ZERO6
+      1141  1B70 CD 90 23       	CALL ONEOUT
+      1142  1B73 C3 79 1B       	JP BIT2
+      1143  1B76 CD 8B 23       ZERO6:	CALL ZEROUT
+      1144  1B79 11 83 1B       BIT2:	LD DE,BITF
+      1145  1B7C ED 53 34 A1    	LD (LOCA),DE
+      1146  1B80 C3 0F 12       	JP WAITL
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  28
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1147  1B83 3A 40 A1       BITF:	LD A,(BITV)
+      1148  1B86 CB 4F          	BIT 1,A		;             "  "
+      1149  1B88 CA 91 1B       	JP Z,ZERO7
+      1150  1B8B CD 90 23       	CALL ONEOUT
+      1151  1B8E C3 94 1B       	JP BIT1
+      1152  1B91 CD 8B 23       ZERO7:	CALL ZEROUT
+      1153  1B94 11 9E 1B       BIT1:	LD DE,BITG
+      1154  1B97 ED 53 34 A1    	LD (LOCA),DE
+      1155  1B9B C3 0F 12       	JP WAITL
+      1156  1B9E 3A 40 A1       BITG:	LD A,(BITV)
+      1157  1BA1 CB 47          	BIT 0,A		;CHECK THE FINAL BIT AND DISPLAY THE ZERO OR ONE
+      1158  1BA3 CA AC 1B       	JP Z,ZERO8	;IN ASCII.
+      1159  1BA6 CD 90 23       	CALL ONEOUT
+      1160  1BA9 C3 AF 1B       	JP BIT0
+      1161  1BAC CD 8B 23       ZERO8:	CALL ZEROUT
+      1162  1BAF 11 B9 1B       BIT0:	LD DE,BITH
+      1163  1BB2 ED 53 34 A1    	LD (LOCA),DE
+      1164  1BB6 C3 0F 12       	JP WAITL
+      1165  1BB9 3A 50 A1       BITH:	LD A,(TOGV)
+      1166  1BBC CB 7F          	BIT 7,A
+      1167  1BBE C2 B5 1F       	JP NZ,TOGG7
+      1168  1BC1 11 CB 1B       	LD DE,BITI
+      1169  1BC4 ED 53 48 A1    	LD (PTPL),DE	;MEMORY REGISTER FOR PORT MONITOR POLL LOCATION.
+      1170  1BC8 C3 DA 1B       	JP POLLA	;GO TO PORT MONITOR POLL ROUTINE.
+      1171  1BCB DB F4          BITI:	IN A,0F4H
+      1172  1BCD FE 68          	CP 68H		;CHECK IF NEXT LOCATION REQUEST.
+      1173  1BCF CA 87 1E       	JP Z,INCPT1
+      1174  1BD2 FE 67          	CP 67H		;CHECK IF PREVIOUS LOCATION REQUEST.
+      1175  1BD4 CA 99 1E       	JP Z,DECPT1
+      1176  1BD7 C3 02 12       	JP CLEAR	;CLEAR AND RETURN IF NO FURTHER PROCESS.
+      1177  1BDA
+      1178  1BDA
+      1179  1BDA DB F5          POLLA:	IN A,0F5H	;THIS IS THE POLL ROUTINE FOR THE PORT VIEW/MONITOR
+      1180  1BDC CB 47          	BIT 0,A		;ROUTINE.  IT WILL UPDATE THE SCREEN EVERY TIME THERE
+      1181  1BDE C2 05 1C       	JP NZ,POLLB	;IS A CHANGE IN THE INPUT VALUE.
+      1182  1BE1 11 DA 1B       	LD DE,POLLA
+      1183  1BE4 ED 53 4C A1    	LD (JUMP3),DE
+      1184  1BE8 3A 08 A1       	LD A,(VAL2)	;SET THE POLLA BIT, SAVE THE REGISTERS, AND RETURN
+      1185  1BEB CB E7          	SET 4,A		;TO THE MAIN PROGRAM.
+      1186  1BED 32 08 A1       	LD (VAL2),A
+      1187  1BF0 50             	LD D,B
+      1188  1BF1 59             	LD E,C
+      1189  1BF2 ED 53 3C A1    	LD (SVBC),DE
+      1190  1BF6 3A 44 A1       	LD A,(PORV)	;CHECK TO SEE IF THE PORT VALUE IS DIFFERENT THAN
+      1191  1BF9 4F             	LD C,A		;THE CURRENT VALUE IN MEMORY FROM THE LAST CHECK.
+      1192  1BFA ED 78          	IN A,(C)
+      1193  1BFC 57             	LD D,A
+      1194  1BFD 3A 04 A1       	LD A,(VAL1)
+      1195  1C00 BA             	CP D
+      1196  1C01 C2 11 1C       	JP NZ,PTDIF1	;IF IT IS DIFFERENT THEN JUMP TO THE SCREEN UPDATE
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  29
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1197  1C04 C9             	RET		;ROUTINE, OTHERWISE RETURN TO THE MAIN PROGRAM.
+      1198  1C05
+      1199  1C05 3A 08 A1       POLLB:	LD A,(VAL2)	;WHEN A NEW PORT LOCATION IS ENTERED OR IF A CLEAR
+      1200  1C08 CB A7          	RES 4,A		;SCREEN IS ENTERED CLEAR THE POLLA BIT AND PERFORM
+      1201  1C0A 32 08 A1       	LD (VAL2),A	;THE DESIRED FUNCTION.
+      1202  1C0D 2A 48 A1       	LD HL,(PTPL)
+      1203  1C10 E9             	JP (HL)
+      1204  1C11
+      1205  1C11
+      1206  1C11 7A             PTDIF1:	LD A,D		;LOAD THE NEW VALUE IN THE DISPLAY REGISTER AND
+      1207  1C12 32 04 A1       	LD (VAL1),A	;IN THE BINARY DISPLAY REGISTER.
+      1208  1C15 32 40 A1       	LD (BITV),A
+      1209  1C18 3E 1B          	LD A,1BH	;PLACE THE CURSOR ON THE CONTENTS DISPLAY LOCATION.
+      1210  1C1A D3 F4          	OUT 0F4H,A
+      1211  1C1C 11 26 1C       	LD DE,BAK15
+      1212  1C1F ED 53 34 A1    	LD (LOCA),DE
+      1213  1C23 C3 0F 12       	JP WAITL
+      1214  1C26 3E 47          BAK15:	LD A,47H
+      1215  1C28 D3 F4          	OUT 0F4H,A
+      1216  1C2A 11 34 1C       	LD DE,BAK16
+      1217  1C2D ED 53 34 A1    	LD (LOCA),DE
+      1218  1C31 C3 0F 12       	JP WAITL
+      1219  1C34 3E 21          BAK16:	LD A,21H
+      1220  1C36 D3 F4          	OUT 0F4H,A
+      1221  1C38 11 42 1C       	LD DE,PTDIF2
+      1222  1C3B ED 53 34 A1    	LD (LOCA),DE
+      1223  1C3F C3 0F 12       	JP WAITL
+      1224  1C42 3E 26          PTDIF2:	LD A,26H
+      1225  1C44 D3 F4          	OUT 0F4H,A
+      1226  1C46 11 42 16       	LD DE,CHGVB
+      1227  1C49 ED 53 34 A1    	LD (LOCA),DE
+      1228  1C4D C3 0F 12       	JP WAITL
+      1229  1C50
+      1230  1C50 3E 0C          PCHG:	LD A,0CH
+      1231  1C52 D3 F4          	OUT 0F4H,A
+      1232  1C54 11 5E 1C       	LD DE,PTCHG
+      1233  1C57 ED 53 34 A1    	LD (LOCA),DE
+      1234  1C5B C3 0F 12       	JP WAITL
+      1235  1C5E
+      1236  1C5E 01 45 23       PTCHG:  LD BC,CHGPT	;OUTPUT THE MESSAGE ASKING FOR PORT NUMBER.
+      1237  1C61 3E 18          	LD A,18H
+      1238  1C63 32 38 A1       	LD (COUNT),A
+      1239  1C66 0A             OUTPC1:	LD A,(BC)
+      1240  1C67 D3 F4          	OUT 0F4H,A
+      1241  1C69 11 73 1C       	LD DE,OUTPC2
+      1242  1C6C ED 53 34 A1    	LD (LOCA),DE
+      1243  1C70 C3 0F 12       	JP WAITL
+      1244  1C73 03             OUTPC2:	INC BC
+      1245  1C74 3A 38 A1       	LD A,(COUNT)
+      1246  1C77 3D             	DEC A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  30
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1247  1C78 32 38 A1       	LD (COUNT),A
+      1248  1C7B FE 00          	CP 00H
+      1249  1C7D C2 66 1C       	JP NZ,OUTPC1
+      1250  1C80 3E 1B          	LD A,1BH
+      1251  1C82 D3 F4          	OUT 0F4H,A
+      1252  1C84 11 8E 1C       	LD DE,BAK17
+      1253  1C87 ED 53 34 A1    	LD (LOCA),DE
+      1254  1C8B C3 0F 12       	JP WAITL
+      1255  1C8E 3E 47          BAK17:	LD A,47H
+      1256  1C90 D3 F4          	OUT 0F4H,A
+      1257  1C92 11 9C 1C       	LD DE,BAK18
+      1258  1C95 ED 53 34 A1    	LD (LOCA),DE
+      1259  1C99 C3 0F 12       	JP WAITL
+      1260  1C9C 3E 20          BAK18:	LD A,20H
+      1261  1C9E D3 F4          	OUT 0F4H,A
+      1262  1CA0 11 AA 1C       	LD DE,OUTPC3
+      1263  1CA3 ED 53 34 A1    	LD (LOCA),DE
+      1264  1CA7 C3 0F 12       	JP WAITL
+      1265  1CAA 3E 34          OUTPC3:	LD A,34H	;SCREEN LOCATION FOR ENTERING DATA.
+      1266  1CAC D3 F4          	OUT 0F4H,A
+      1267  1CAE 11 B8 1C       	LD DE,OUTPC4
+      1268  1CB1 ED 53 34 A1    	LD (LOCA),DE
+      1269  1CB5 C3 0F 12       	JP WAITL
+      1270  1CB8 3A 08 A1       OUTPC4:	LD A,(VAL2)	;SET THE PORT CHANGE BIT.
+      1271  1CBB CB EF          	SET 5,A
+      1272  1CBD 32 08 A1       	LD (VAL2),A
+      1273  1CC0 C3 E9 14       	JP NDEL5	;JUMP TO ENTER THE PORT ADDRESS.
+      1274  1CC3
+      1275  1CC3 7A             PTCHG1:	LD A,D
+      1276  1CC4 32 44 A1       	LD (PORV),A	;STORE THE CURRENT VALUE OF PORT LOCATION.
+      1277  1CC7 3E 1B          	LD A,1BH	;SET THE CURSOR TO DISPLAY LOCATION.
+      1278  1CC9 D3 F4          	OUT 0F4H,A
+      1279  1CCB 11 D5 1C       	LD DE,BAK19
+      1280  1CCE ED 53 34 A1    	LD (LOCA),DE
+      1281  1CD2 C3 0F 12       	JP WAITL
+      1282  1CD5 3E 47          BAK19:	LD A,47H
+      1283  1CD7 D3 F4          	OUT 0F4H,A
+      1284  1CD9 11 E3 1C       	LD DE,BAK20
+      1285  1CDC ED 53 34 A1    	LD (LOCA),DE
+      1286  1CE0 C3 0F 12       	JP WAITL
+      1287  1CE3 3E 21          BAK20:	LD A,21H
+      1288  1CE5 D3 F4          	OUT 0F4H,A
+      1289  1CE7 11 F1 1C       	LD DE,PTCHG8
+      1290  1CEA ED 53 34 A1    	LD (LOCA),DE
+      1291  1CEE C3 0F 12       	JP WAITL
+      1292  1CF1 3E 20          PTCHG8:	LD A,20H
+      1293  1CF3 D3 F4          	OUT 0F4H,A
+      1294  1CF5 11 FF 1C       	LD DE,PTCHG9
+      1295  1CF8 ED 53 34 A1    	LD (LOCA),DE
+      1296  1CFC C3 0F 12       	JP WAITL
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  31
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1297  1CFF 01 0B 23       PTCHG9:	LD BC,CUMES	;OUT THE CURRENTLY: MESSAGE
+      1298  1D02 3E 0A          	LD A,0AH
+      1299  1D04 32 38 A1       	LD (COUNT),A
+      1300  1D07 0A             PTCHG2: LD A,(BC)
+      1301  1D08 D3 F4          	OUT 0F4H,A
+      1302  1D0A 11 14 1D       	LD DE,PTCHG3
+      1303  1D0D ED 53 34 A1    	LD (LOCA),DE
+      1304  1D11 C3 0F 12       	JP WAITL
+      1305  1D14 03             PTCHG3:	INC BC
+      1306  1D15 3A 38 A1       	LD A,(COUNT)
+      1307  1D18 3D             	DEC A
+      1308  1D19 32 38 A1       	LD (COUNT),A
+      1309  1D1C FE 00          	CP 00H
+      1310  1D1E C2 07 1D       	JP NZ,PTCHG2
+      1311  1D21 3A 44 A1       	LD A,(PORV)
+      1312  1D24 4F             	LD C,A
+      1313  1D25 ED 78          	IN A,(C)	;INPUT THE CURRENT PORT VALUE.
+      1314  1D27 32 04 A1       	LD (VAL1),A
+      1315  1D2A C3 42 16       	JP CHGVB	;JUMP TO CHANGE THE VALUE TO ASCII AND DISPLAY IT.
+      1316  1D2D 3A 44 A1       PTCHG4:	LD A,(PORV)
+      1317  1D30 4F             	LD C,A
+      1318  1D31 ED 51          	OUT (C),D	;CHANGE THE VALUE AT THE PORT LOCATION.
+      1319  1D33 3E 1B             	LD A,1BH	;MOVE THE CURSOR TO THE END OF THE LINE FOR
+      1320  1D35 D3 F4          	OUT 0F4H,A	;EASIER READABILITY.
+      1321  1D37 11 41 1D       	LD DE,BAK21
+      1322  1D3A ED 53 34 A1    	LD (LOCA),DE
+      1323  1D3E C3 0F 12       	JP WAITL
+      1324  1D41 3E 47          BAK21:	LD A,47H
+      1325  1D43 D3 F4          	OUT 0F4H,A
+      1326  1D45 11 4F 1D       	LD DE,BAK22
+      1327  1D48 ED 53 34 A1    	LD (LOCA),DE
+      1328  1D4C C3 0F 12       	JP WAITL
+      1329  1D4F 3E 21          BAK22:	LD A,21H
+      1330  1D51 D3 F4          	OUT 0F4H,A
+      1331  1D53 11 5D 1D       	LD DE,PTCHG5
+      1332  1D56 ED 53 34 A1    	LD (LOCA),DE
+      1333  1D5A C3 0F 12       	JP WAITL
+      1334  1D5D 3E 36          PTCHG5:	LD A,36H
+      1335  1D5F D3 F4          	OUT 0F4H,A
+      1336  1D61 11 6B 1D       	LD DE,PTCHG6
+      1337  1D64 ED 53 34 A1    	LD (LOCA),DE
+      1338  1D68 C3 0F 12       	JP WAITL
+      1339  1D6B 11 CB 1B       PTCHG6:	LD DE,BITI	;JUMP TO END OF PORT VIEW ROUTINE TO CHECK IF
+      1340  1D6E ED 53 34 A1    	LD (LOCA),DE	;NEXT OR PREVIOUS LOCATION REQUEST, OR CLEAR
+      1341  1D72 C3 58 14       	JP POLL		;AND RETURN TO MAIN PROGRAM.
+      1342  1D75
+      1343  1D75
+      1344  1D75 2A 18 A1       INC1:	LD HL,(VAL6)	;INCREMENT TO THE NEXT MEMORY LOCATION TO CHANGE
+      1345  1D78 23             	INC HL		;OR VIEW.
+      1346  1D79 22 18 A1       	LD (VAL6),HL
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  32
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1347  1D7C C3 89 1D       	JP INCDC0
+      1348  1D7F
+      1349  1D7F 2A 18 A1       DEC1:	LD HL,(VAL6)	;DECREMENT TO THE PREVIOUS MEMORY LOCATION TO
+      1350  1D82 2B             	DEC HL		;CHANGE OR VIEW.
+      1351  1D83 22 18 A1       	LD (VAL6),HL
+      1352  1D86 C3 89 1D       	JP INCDC0
+      1353  1D89
+      1354  1D89 3E 1B          INCDC0:	LD A,1BH	;PLACE THE CURSOR AT THE MEMORY LOCATION DISPLAY
+      1355  1D8B D3 F4          	OUT 0F4H,A	;LOCATION.
+      1356  1D8D 11 97 1D       	LD DE,BAK23
+      1357  1D90 ED 53 34 A1    	LD (LOCA),DE
+      1358  1D94 C3 0F 12       	JP WAITL
+      1359  1D97 3E 47          BAK23:	LD A,47H
+      1360  1D99 D3 F4          	OUT 0F4H,A
+      1361  1D9B 11 A5 1D       	LD DE,BAK24
+      1362  1D9E ED 53 34 A1    	LD (LOCA),DE
+      1363  1DA2 C3 0F 12       	JP WAITL
+      1364  1DA5 3E 20          BAK24:	LD A,20H
+      1365  1DA7 D3 F4          	OUT 0F4H,A
+      1366  1DA9 11 B3 1D       	LD DE,INC2
+      1367  1DAC ED 53 34 A1    	LD (LOCA),DE
+      1368  1DB0 C3 0F 12       	JP WAITL
+      1369  1DB3 3E 32          INC2:	LD A,32H
+      1370  1DB5 D3 F4          	OUT 0F4H,A
+      1371  1DB7 11 C1 1D       	LD DE,DEC2
+      1372  1DBA ED 53 34 A1    	LD (LOCA),DE
+      1373  1DBE C3 0F 12       	JP WAITL
+      1374  1DC1 2A 18 A1       DEC2:	LD HL,(VAL6)	;LOAD THE NEW LOCATION TO VIEW OR CHANGE IN
+      1375  1DC4 7C             	LD A,H		;REGISTERS TO CONVERT TO ASCII AND DISPLAY.
+      1376  1DC5 32 20 A1       	LD (VAL8),A
+      1377  1DC8 7D             	LD A,L
+      1378  1DC9 32 24 A1       	LD (VAL9),A
+      1379  1DCC 3A 08 A1       INCDC9:	LD A,(VAL2)	;THE NEXT SECTION IS PASSED THROUGH TWICE CONVERTING
+      1380  1DCF CB 57          	BIT 2,A		;THE MEMORY LOCATION TO VIEW OR CHANGE TO ASCII AND
+      1381  1DD1 C2 DA 1D       	JP NZ,INCDC2	;DISPLAY.
+      1382  1DD4 3A 20 A1       	LD A,(VAL8)
+      1383  1DD7 C3 DD 1D       	JP INCDC3
+      1384  1DDA 3A 24 A1       INCDC2:	LD A,(VAL9)
+      1385  1DDD 47             INCDC3:	LD B,A
+      1386  1DDE E6 80          	AND 80H
+      1387  1DE0 CA EC 1D       	JP Z,INDCL0
+      1388  1DE3 78             	LD A,B
+      1389  1DE4 E6 60          	AND 60H
+      1390  1DE6 CA EC 1D       	JP Z,INDCL0
+      1391  1DE9 C3 03 1E       	JP INDCH1
+      1392  1DEC 78             INDCL0:	LD A,B
+      1393  1DED E6 F0          	AND 0F0H
+      1394  1DEF CD 81 23       	CALL ROTR
+      1395  1DF2 C6 30          	ADD A,30H
+      1396  1DF4 D3 F4          	OUT 0F4H,A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  33
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1397  1DF6 11 00 1E       	LD DE,INCDC4
+      1398  1DF9 ED 53 34 A1    	LD (LOCA),DE
+      1399  1DFD C3 0F 12       	JP WAITL
+      1400  1E00 C3 18 1E       INCDC4:	JP SCND
+      1401  1E03 78             INDCH1:	LD A,B
+      1402  1E04 E6 F0          	AND 0F0H
+      1403  1E06 CD 81 23       	CALL ROTR
+      1404  1E09 C6 37          	ADD A,37H
+      1405  1E0B D3 F4          	OUT 0F4H,A
+      1406  1E0D 11 17 1E       	LD DE,INCDC5
+      1407  1E10 ED 53 34 A1    	LD (LOCA),DE
+      1408  1E14 C3 0F 12       	JP WAITL
+      1409  1E17 00             INCDC5:	NOP
+      1410  1E18 78             SCND:	LD A,B
+      1411  1E19 E6 0F          	AND 0FH
+      1412  1E1B CD 86 23       	CALL ROTL
+      1413  1E1E 47             	LD B,A
+      1414  1E1F E6 80          	AND 80H
+      1415  1E21 CA 2D 1E       	JP Z,INDCL1
+      1416  1E24 78             	LD A,B
+      1417  1E25 E6 60          	AND 60H
+      1418  1E27 CA 2D 1E       	JP Z,INDCL1
+      1419  1E2A C3 42 1E       	JP INDCH2
+      1420  1E2D 78             INDCL1:	LD A,B
+      1421  1E2E CD 81 23       	CALL ROTR
+      1422  1E31 C6 30          	ADD A,30H
+      1423  1E33 D3 F4          	OUT 0F4H,A
+      1424  1E35 11 3F 1E       	LD DE,INCDC6
+      1425  1E38 ED 53 34 A1    	LD (LOCA),DE
+      1426  1E3C C3 0F 12       	JP WAITL
+      1427  1E3F C3 55 1E       INCDC6:	JP INCDC8
+      1428  1E42 78             INDCH2:	LD A,B
+      1429  1E43 CD 81 23       	CALL ROTR
+      1430  1E46 C6 37          	ADD A,37H
+      1431  1E48 D3 F4          	OUT 0F4H,A
+      1432  1E4A 11 54 1E       	LD DE,INCDC7
+      1433  1E4D ED 53 34 A1    	LD (LOCA),DE
+      1434  1E51 C3 0F 12       	JP WAITL
+      1435  1E54 00             INCDC7:	NOP
+      1436  1E55 3A 50 A1       INCDC8:	LD A,(TOGV)
+      1437  1E58 CB 7F          	BIT 7,A
+      1438  1E5A C2 0F 21       	JP NZ,TOGLO3	;IF IN BIT TOGGLE MODE JUMP TO INPUT PORT VALUE.
+      1439  1E5D 3A 08 A1       	LD A,(VAL2)
+      1440  1E60 CB 5F          	BIT 3,A
+      1441  1E62 C2 F1 1E       	JP NZ,PTID4
+      1442  1E65 32 08 A1       	LD (VAL2),A
+      1443  1E68 3A 08 A1       	LD A,(VAL2)
+      1444  1E6B CB 57          	BIT 2,A
+      1445  1E6D C2 78 1E       	JP NZ,INCDCA
+      1446  1E70 CB D7          	SET 2,A
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  34
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1447  1E72 32 08 A1       	LD (VAL2),A
+      1448  1E75 C3 CC 1D       	JP INCDC9
+      1449  1E78 3A 08 A1       INCDCA:	LD A,(VAL2)
+      1450  1E7B CB 97          	RES 2,A
+      1451  1E7D 32 08 A1       	LD (VAL2),A
+      1452  1E80 ED 5B 18 A1    	LD DE,(VAL6)
+      1453  1E84 C3 CE 15       	JP INCDCB
+      1454  1E87
+      1455  1E87 3A 44 A1       INCPT1:	LD A,(PORV)	;INCREMENT TO THE NEXT PORT TO VIEW OR CHANGE.
+      1456  1E8A 3C             	INC A
+      1457  1E8B 32 44 A1       	LD (PORV),A
+      1458  1E8E 3A 50 A1       	LD A,(TOGV)
+      1459  1E91 CB 7F          	BIT 7,A
+      1460  1E93 CA AB 1E       	JP Z,PTID
+      1461  1E96 C3 D1 20       	JP TOGLO0  	;IF IN PORT BIT TOGGLE MODE JUMP TO PLACE CURSOR.
+      1462  1E99
+      1463  1E99 3A 44 A1       DECPT1:	LD A,(PORV)	;DECREMENT TO THE PREVIOUS PORT TO VIEW OR CHANGE.
+      1464  1E9C 3D             	DEC A
+      1465  1E9D 32 44 A1       	LD (PORV),A
+      1466  1EA0 3A 50 A1       	LD A,(TOGV)
+      1467  1EA3 CB 7F          	BIT 7,A
+      1468  1EA5 CA AB 1E       	JP Z,PTID
+      1469  1EA8 C3 D1 20       	JP TOGLO0
+      1470  1EAB
+      1471  1EAB 3E 1B          PTID:	LD A,1BH	;PLACE THE CURSOR IN THE DISPLAY AREA.
+      1472  1EAD D3 F4          	OUT 0F4H,A
+      1473  1EAF 11 B9 1E       	LD DE,BAK25
+      1474  1EB2 ED 53 34 A1    	LD (LOCA),DE
+      1475  1EB6 C3 0F 12       	JP WAITL
+      1476  1EB9 3E 47          BAK25:	LD A,47H
+      1477  1EBB D3 F4          	OUT 0F4H,A
+      1478  1EBD 11 C7 1E       	LD DE,BAK26
+      1479  1EC0 ED 53 34 A1    	LD (LOCA),DE
+      1480  1EC4 C3 0F 12       	JP WAITL
+      1481  1EC7 3E 20          BAK26:	LD A,20H
+      1482  1EC9 D3 F4          	OUT 0F4H,A
+      1483  1ECB 11 D5 1E       	LD DE,PTID2
+      1484  1ECE ED 53 34 A1    	LD (LOCA),DE
+      1485  1ED2 C3 0F 12       	JP WAITL
+      1486  1ED5 3E 34          PTID2:	LD A,34H
+      1487  1ED7 D3 F4          	OUT 0F4H,A
+      1488  1ED9 11 E3 1E       	LD DE,PTID3
+      1489  1EDC ED 53 34 A1    	LD (LOCA),DE
+      1490  1EE0 C3 0F 12       	JP WAITL
+      1491  1EE3 3A 08 A1       PTID3:	LD A,(VAL2)	;SET A BIT THAT SHOWS THAT A PORT IS BEING
+      1492  1EE6 CB DF          	SET 3,A		;INCREMENTED OR DECREMENTED THEN GO TO
+      1493  1EE8 32 08 A1       	LD (VAL2),A	;ROUTINE THAT WILL CONVERT THE PORT TO ASCII
+      1494  1EEB 3A 44 A1       	LD A,(PORV)	;AND DISPLAY IT.
+      1495  1EEE C3 DD 1D       	JP INCDC3
+      1496  1EF1 3A 44 A1       PTID4:	LD A,(PORV)
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  35
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1497  1EF4 57             	LD D,A
+      1498  1EF5 3A 08 A1       	LD A,(VAL2)	;CHECK IF PORT CHANGE MODE.
+      1499  1EF8 CB 6F          	BIT 5,A
+      1500  1EFA C2 C3 1C       	JP NZ,PTCHG1
+      1501  1EFD C3 82 1A       	JP PTVW2	;IF NOT CHANGING A PORT JUMP TO VIEW ROUTINE.
+      1502  1F00
+      1503  1F00
+      1504  1F00 3E 0C          TOGGLE:	LD A,0CH
+      1505  1F02 D3 F4          	OUT 0F4H,A
+      1506  1F04 11 0E 1F       	LD DE,TOGG0
+      1507  1F07 ED 53 34 A1    	LD (LOCA),DE
+      1508  1F0B C3 0F 12       	JP WAITL
+      1509  1F0E 01 5D 23       TOGG0:	LD BC,TOGMES
+      1510  1F11 3E 24          	LD A,24H
+      1511  1F13 32 38 A1       	LD (COUNT),A
+      1512  1F16 0A             OUTTOG:	LD A,(BC)
+      1513  1F17 D3 F4          	OUT 0F4H,A
+      1514  1F19 11 23 1F       	LD DE,TOGG1
+      1515  1F1C ED 53 34 A1    	LD (LOCA),DE
+      1516  1F20 C3 0F 12       	JP WAITL
+      1517  1F23 03             TOGG1:	INC BC
+      1518  1F24 3A 38 A1       	LD A,(COUNT)
+      1519  1F27 3D             	DEC A
+      1520  1F28 32 38 A1       	LD (COUNT),A
+      1521  1F2B FE 00          	CP 00H
+      1522  1F2D C2 16 1F       	JP NZ,OUTTOG
+      1523  1F30 3E 1B          	LD A,1BH
+      1524  1F32 D3 F4          	OUT 0F4H,A
+      1525  1F34 11 3E 1F       	LD DE,BAK27
+      1526  1F37 ED 53 34 A1    	LD (LOCA),DE
+      1527  1F3B C3 0F 12       	JP WAITL
+      1528  1F3E 3E 47          BAK27:	LD A,47H
+      1529  1F40 D3 F4          	OUT 0F4H,A
+      1530  1F42 11 4C 1F       	LD DE,BAK28
+      1531  1F45 ED 53 34 A1    	LD (LOCA),DE
+      1532  1F49 C3 0F 12       	JP WAITL
+      1533  1F4C 3E 21          BAK28:	LD A,21H
+      1534  1F4E D3 F4          	OUT 0F4H,A
+      1535  1F50 11 5A 1F       	LD DE,TOGG2
+      1536  1F53 ED 53 34 A1    	LD (LOCA),DE
+      1537  1F57 C3 0F 12       	JP WAITL
+      1538  1F5A 3E 29          TOGG2:	LD A,29H
+      1539  1F5C D3 F4          	OUT 0F4H,A
+      1540  1F5E 11 68 1F       	LD DE,TOGG3
+      1541  1F61 ED 53 34 A1    	LD (LOCA),DE
+      1542  1F65 C3 0F 12       	JP WAITL
+      1543  1F68 3A 50 A1       TOGG3:	LD A,(TOGV)
+      1544  1F6B CB FF          	SET 7,A
+      1545  1F6D 32 50 A1       	LD (TOGV),A
+      1546  1F70 C3 E9 14       	JP NDEL5
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  36
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1547  1F73
+      1548  1F73 7A             TOGG4:	LD A,D
+      1549  1F74 32 44 A1       	LD (PORV),A
+      1550  1F77 4F             	LD C,A
+      1551  1F78 ED 78          	IN A,(C)
+      1552  1F7A 32 40 A1       	LD (BITV),A
+      1553  1F7D 3E 1B          	LD A,1BH
+      1554  1F7F D3 F4          	OUT 0F4H,A
+      1555  1F81 11 8B 1F       	LD DE,BAK29
+      1556  1F84 ED 53 34 A1    	LD (LOCA),DE
+      1557  1F88 C3 0F 12       	JP WAITL
+      1558  1F8B 3E 47          BAK29:	LD A,47H
+      1559  1F8D D3 F4          	OUT 0F4H,A
+      1560  1F8F 11 99 1F       	LD DE,BAK30
+      1561  1F92 ED 53 34 A1    	LD (LOCA),DE
+      1562  1F96 C3 0F 12       	JP WAITL
+      1563  1F99 3E 21          BAK30:	LD A,21H
+      1564  1F9B D3 F4          	OUT 0F4H,A
+      1565  1F9D 11 A7 1F       	LD DE,TOGG5
+      1566  1FA0 ED 53 34 A1    	LD (LOCA),DE
+      1567  1FA4 C3 0F 12       	JP WAITL
+      1568  1FA7 3E 2F          TOGG5:	LD A,2FH
+      1569  1FA9 D3 F4          	OUT 0F4H,A
+      1570  1FAB 11 E1 1A       	LD DE,TOGG6
+      1571  1FAE ED 53 34 A1    	LD (LOCA),DE
+      1572  1FB2 C3 0F 12       	JP WAITL
+      1573  1FB5
+      1574  1FB5 11 BF 1F       TOGG7:	LD DE,TOGG8
+      1575  1FB8 ED 53 34 A1    	LD (LOCA),DE
+      1576  1FBC C3 58 14       	JP POLL
+      1577  1FBF
+      1578  1FBF DB F4          TOGG8:	IN A,0F4H
+      1579  1FC1 FE 68          	CP 68H
+      1580  1FC3 CA 87 1E       	JP Z,INCPT1
+      1581  1FC6 FE 67          	CP 67H
+      1582  1FC8 CA 99 1E       	JP Z,DECPT1
+      1583  1FCB FE 37          	CP 37H
+      1584  1FCD CA F6 1F       	JP Z,TOGSEV
+      1585  1FD0 FE 36          	CP 36H
+      1586  1FD2 CA 0E 20       	JP Z,TOGSIX
+      1587  1FD5 FE 35          	CP 35H
+      1588  1FD7 CA 26 20       	JP Z,TOGFIV
+      1589  1FDA FE 34          	CP 34H
+      1590  1FDC CA 3E 20       	JP Z,TOGFOR
+      1591  1FDF FE 33          	CP 33H
+      1592  1FE1 CA 56 20       	JP Z,TOGTHR
+      1593  1FE4 FE 32          	CP 32H
+      1594  1FE6 CA 6E 20       	JP Z,TOGTWO
+      1595  1FE9 FE 31          	CP 31H
+      1596  1FEB CA 86 20       	JP Z,TOGONE
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  37
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1597  1FEE FE 30          	CP 30H
+      1598  1FF0 CA 9E 20       	JP Z,TOGZRO
+      1599  1FF3 C3 02 12       	JP CLEAR
+      1600  1FF6
+      1601  1FF6 3A 40 A1       TOGSEV:	LD A,(BITV)
+      1602  1FF9 CB 7F          	BIT 7,A
+      1603  1FFB C2 06 20       	JP NZ,SEVRES
+      1604  1FFE CB FF          	SET 7,A
+      1605  2000 32 40 A1       	LD (BITV),A
+      1606  2003 C3 B6 20       	JP TOGOUT
+      1607  2006 CB BF          SEVRES:	RES 7,A
+      1608  2008 32 40 A1       	LD (BITV),A
+      1609  200B C3 B6 20       	JP TOGOUT
+      1610  200E 3A 40 A1       TOGSIX:	LD A,(BITV)
+      1611  2011 CB 77          	BIT 6,A
+      1612  2013 C2 1E 20       	JP NZ,SIXRES
+      1613  2016 CB F7          	SET 6,A
+      1614  2018 32 40 A1       	LD (BITV),A
+      1615  201B C3 B6 20       	JP TOGOUT
+      1616  201E CB B7          SIXRES:	RES 6,A
+      1617  2020 32 40 A1       	LD (BITV),A
+      1618  2023 C3 B6 20       	JP TOGOUT
+      1619  2026 3A 40 A1       TOGFIV:	LD A,(BITV)
+      1620  2029 CB 6F          	BIT 5,A
+      1621  202B C2 36 20       	JP NZ,FIVRES
+      1622  202E CB EF          	SET 5,A
+      1623  2030 32 40 A1       	LD (BITV),A
+      1624  2033 C3 B6 20       	JP TOGOUT
+      1625  2036 CB AF          FIVRES:	RES 5,A
+      1626  2038 32 40 A1       	LD (BITV),A
+      1627  203B C3 B6 20       	JP TOGOUT
+      1628  203E 3A 40 A1       TOGFOR:	LD A,(BITV)
+      1629  2041 CB 67          	BIT 4,A
+      1630  2043 C2 4E 20       	JP NZ,FORRES
+      1631  2046 CB E7          	SET 4,A
+      1632  2048 32 40 A1       	LD (BITV),A
+      1633  204B C3 B6 20       	JP TOGOUT
+      1634  204E CB A7          FORRES:	RES 4,A
+      1635  2050 32 40 A1       	LD (BITV),A
+      1636  2053 C3 B6 20       	JP TOGOUT
+      1637  2056 3A 40 A1       TOGTHR:	LD A,(BITV)
+      1638  2059 CB 5F          	BIT 3,A
+      1639  205B C2 66 20       	JP NZ,THRRES
+      1640  205E CB DF          	SET 3,A
+      1641  2060 32 40 A1       	LD (BITV),A
+      1642  2063 C3 B6 20       	JP TOGOUT
+      1643  2066 CB 9F          THRRES:	RES 3,A
+      1644  2068 32 40 A1       	LD (BITV),A
+      1645  206B C3 B6 20       	JP TOGOUT
+      1646  206E 3A 40 A1       TOGTWO:	LD A,(BITV)
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  38
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1647  2071 CB 57          	BIT 2,A
+      1648  2073 C2 7E 20       	JP NZ,TWORES
+      1649  2076 CB D7          	SET 2,A
+      1650  2078 32 40 A1       	LD (BITV),A
+      1651  207B C3 B6 20       	JP TOGOUT
+      1652  207E CB 97          TWORES:	RES 2,A
+      1653  2080 32 40 A1       	LD (BITV),A
+      1654  2083 C3 B6 20       	JP TOGOUT
+      1655  2086 3A 40 A1       TOGONE:	LD A,(BITV)
+      1656  2089 CB 4F          	BIT 1,A
+      1657  208B C2 96 20       	JP NZ,ONERES
+      1658  208E CB CF          	SET 1,A
+      1659  2090 32 40 A1       	LD (BITV),A
+      1660  2093 C3 B6 20       	JP TOGOUT
+      1661  2096 CB 8F          ONERES:	RES 1,A
+      1662  2098 32 40 A1       	LD (BITV),A
+      1663  209B C3 B6 20       	JP TOGOUT
+      1664  209E 3A 40 A1       TOGZRO:	LD A,(BITV)
+      1665  20A1 CB 47          	BIT 0,A
+      1666  20A3 C2 AE 20       	JP NZ,ZRORES
+      1667  20A6 CB C7          	SET 0,A
+      1668  20A8 32 40 A1       	LD (BITV),A
+      1669  20AB C3 B6 20       	JP TOGOUT
+      1670  20AE CB 87          ZRORES:	RES 0,A
+      1671  20B0 32 40 A1       	LD (BITV),A
+      1672  20B3 C3 B6 20       	JP TOGOUT
+      1673  20B6
+      1674  20B6 3A 40 A1       TOGOUT:	LD A,(BITV)
+      1675  20B9 57             	LD D,A
+      1676  20BA 3A 44 A1       	LD A,(PORV)
+      1677  20BD 4F             	LD C,A
+      1678  20BE ED 51          	OUT (C),D
+      1679  20C0 11 CA 20       	LD DE,TOGG9
+      1680  20C3 ED 53 34 A1    	LD (LOCA),DE
+      1681  20C7 C3 0F 12       	JP WAITL
+      1682  20CA
+      1683  20CA
+      1684  20CA 3A 44 A1       TOGG9:	LD A,(PORV)
+      1685  20CD 57             	LD D,A
+      1686  20CE C3 73 1F       	JP TOGG4
+      1687  20D1
+      1688  20D1 3E 1B          TOGLO0:	LD A,1BH
+      1689  20D3 D3 F4          	OUT 0F4H,A
+      1690  20D5 11 DF 20       	LD DE,BAK31
+      1691  20D8 ED 53 34 A1    	LD (LOCA),DE
+      1692  20DC C3 0F 12       	JP WAITL
+      1693  20DF 3E 47          BAK31:	LD A,47H
+      1694  20E1 D3 F4          	OUT 0F4H,A
+      1695  20E3 11 ED 20       	LD DE,BAK32
+      1696  20E6 ED 53 34 A1    	LD (LOCA),DE
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  39
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1697  20EA C3 0F 12       	JP WAITL
+      1698  20ED 3E 21          BAK32:	LD A,21H
+      1699  20EF D3 F4          	OUT 0F4H,A
+      1700  20F1 11 FB 20       	LD DE,TOGLO1
+      1701  20F4 ED 53 34 A1    	LD (LOCA),DE
+      1702  20F8 C3 0F 12       	JP WAITL
+      1703  20FB 3E 29          TOGLO1:	LD A,29H
+      1704  20FD D3 F4          	OUT 0F4H,A
+      1705  20FF 11 09 21       	LD DE,TOGLO2
+      1706  2102 ED 53 34 A1    	LD (LOCA),DE
+      1707  2106 C3 0F 12       	JP WAITL
+      1708  2109 3A 44 A1       TOGLO2:	LD A,(PORV)
+      1709  210C C3 DD 1D       	JP INCDC3
+      1710  210F
+      1711  210F 3A 44 A1       TOGLO3:	LD A,(PORV)
+      1712  2112 57             	LD D,A
+      1713  2113 C3 73 1F       	JP TOGG4
+      1714  2116
+      1715  2116                	
+      1716  2116 0C 57 41 49    PRDAT:	DB	0CH,57H,41H,49H,54H	;VALUES FOR PROGRAMING THE TT5.
+      1716  211A 54
+      1717  211B 1B 57 31 36    F1DAT:	DB	1BH,57H,31H,36H,31H,30H,30H,2AH
+      1717  211F 31 30 30 2A
+      1718  2123 1B 57 32 36    F2DAT:	DB	1BH,57H,32H,36H,32H,30H,30H,2AH
+      1718  2127 32 30 30 2A
+      1719  212B 1B 57 33 36    F3DAT:	DB	1BH,57H,33H,36H,33H,30H,30H,2AH
+      1719  212F 33 30 30 2A
+      1720  2133 1B 57 34 36    F4DAT:  DB	1BH,57H,34H,36H,34H,30H,30H,2AH
+      1720  2137 34 30 30 2A
+      1721  213B 1B 57 35 36    F5DAT:	DB	1BH,57H,35H,36H,35H,30H,30H,2AH
+      1721  213F 35 30 30 2A
+      1722  2143 1B 57 36 36    F6DAT:	DB	1BH,57H,36H,36H,36H,30H,30H,2AH
+      1722  2147 36 30 30 2A
+      1723  214B 1B 57 37 36    F7DAT:	DB	1BH,57H,37H,36H,37H,30H,30H,2AH
+      1723  214F 37 30 30 2A
+      1724  2153 1B 57 38 36    F8DAT:	DB	1BH,57H,38H,36H,38H,30H,30H,2AH
+      1724  2157 38 30 30 2A
+      1725  215B 20 52 45 41    DATPR:	DB	20H,52H,45H,41H,44H,59H,07H
+      1725  215F 44 59 07
+      1726  2162
+      1727  2162
+      1728  2162 48 45 4C 50    MESS1:	DEFM	'HELP MENU- CLEAR TO EXIT   ANY KEY TO CONTINUE'
+      1728  2166 20 4D 45 4E
+      1728  216A 55 2D 20 43
+      1728  216E 4C 45 41 52
+      1728  2172 20 54 4F 20
+      1728  2176 45 58 49 54
+      1728  217A 20 20 20 41
+      1728  217E 4E 59 20 4B
+      1728  2182 45 59 20 54
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  40
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1728  2186 4F 20 43 4F
+      1728  218A 4E 54 49 4E
+      1728  218E 55 45
+      1729  2190
+      1730  2190
+      1731  2190 20 20 20 46    HELPF2:	DEFM	'   F2= TOGGLE BITS OF      VALUE IN PORT __H'
+      1731  2194 32 3D 20 54
+      1731  2198 4F 47 47 4C
+      1731  219C 45 20 42 49
+      1731  21A0 54 53 20 4F
+      1731  21A4 46 20 20 20
+      1731  21A8 20 20 20 56
+      1731  21AC 41 4C 55 45
+      1731  21B0 20 49 4E 20
+      1731  21B4 50 4F 52 54
+      1731  21B8 20 5F 5F 48
+      1732  21BC
+      1733  21BC
+      1734  21BC 20 20 46 33    MESS2:	DEFM	'  F3= VIEW CONTENTS OF   MEMORY LOCATION ____H.'
+      1734  21C0 3D 20 56 49
+      1734  21C4 45 57 20 43
+      1734  21C8 4F 4E 54 45
+      1734  21CC 4E 54 53 20
+      1734  21D0 4F 46 20 20
+      1734  21D4 20 4D 45 4D
+      1734  21D8 4F 52 59 20
+      1734  21DC 4C 4F 43 41
+      1734  21E0 54 49 4F 4E
+      1734  21E4 20 5F 5F 5F
+      1734  21E8 5F 48 2E
+      1735  21EB
+      1736  21EB
+      1737  21EB 46 35 3D 20    MESS4:	DEFM	'F5= VIEW CONTENTS OF I/OLOCATION __H IN BINARY.'
+      1737  21EF 56 49 45 57
+      1737  21F3 20 43 4F 4E
+      1737  21F7 54 45 4E 54
+      1737  21FB 53 20 4F 46
+      1737  21FF 20 49 2F 4F
+      1737  2203 4C 4F 43 41
+      1737  2207 54 49 4F 4E
+      1737  220B 20 5F 5F 48
+      1737  220F 20 49 4E 20
+      1737  2213 42 49 4E 41
+      1737  2217 52 59 2E
+      1738  221A
+      1739  221A
+      1740  221A 20 20 46 34    MESS3:	DEFM	'  F4= CHANGE VALUE IN    MEMORY LOCATION ____H.'
+      1740  221E 3D 20 43 48
+      1740  2222 41 4E 47 45
+      1740  2226 20 56 41 4C
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  41
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1740  222A 55 45 20 49
+      1740  222E 4E 20 20 20
+      1740  2232 20 4D 45 4D
+      1740  2236 4F 52 59 20
+      1740  223A 4C 4F 43 41
+      1740  223E 54 49 4F 4E
+      1740  2242 20 5F 5F 5F
+      1740  2246 5F 48 2E
+      1741  2249
+      1742  2249
+      1743  2249 46 36 3D 20    MESS5:	DEFM	'F6= CHANGE VALUE OF I/O    LOCATION __H. '
+      1743  224D 43 48 41 4E
+      1743  2251 47 45 20 56
+      1743  2255 41 4C 55 45
+      1743  2259 20 4F 46 20
+      1743  225D 49 2F 4F 20
+      1743  2261 20 20 20 4C
+      1743  2265 4F 43 41 54
+      1743  2269 49 4F 4E 20
+      1743  226D 5F 5F 48 2E
+      1743  2271 20
+      1744  2272
+      1745  2272
+      1746  2272 46 37 3D 44    HELPF7:	DEFM	'F7=DECREMENT TO PREVIOUSMEMORY OR PORT LOCATION'
+      1746  2276 45 43 52 45
+      1746  227A 4D 45 4E 54
+      1746  227E 20 54 4F 20
+      1746  2282 50 52 45 56
+      1746  2286 49 4F 55 53
+      1746  228A 4D 45 4D 4F
+      1746  228E 52 59 20 4F
+      1746  2292 52 20 50 4F
+      1746  2296 52 54 20 4C
+      1746  229A 4F 43 41 54
+      1746  229E 49 4F 4E
+      1747  22A1
+      1748  22A1
+      1749  22A1 20 46 38 3D    HELPF8:	DEFM	' F8= INCREMENT TO NEXT  MEMORY OR PORT LOCATION'
+      1749  22A5 20 49 4E 43
+      1749  22A9 52 45 4D 45
+      1749  22AD 4E 54 20 54
+      1749  22B1 4F 20 4E 45
+      1749  22B5 58 54 20 20
+      1749  22B9 4D 45 4D 4F
+      1749  22BD 52 59 20 4F
+      1749  22C1 52 20 50 4F
+      1749  22C5 52 54 20 4C
+      1749  22C9 4F 43 41 54
+      1749  22CD 49 4F 4E
+      1750  22D0
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  42
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1751  22D0
+      1752  22D0 41 44 44 52    F2MES:	DEFM	'ADDRESS TO VIEW   ____H'
+      1752  22D4 45 53 53 20
+      1752  22D8 54 4F 20 56
+      1752  22DC 49 45 57 20
+      1752  22E0 20 20 5F 5F
+      1752  22E4 5F 5F 48
+      1753  22E7
+      1754  22E7
+      1755  22E7 43 4F 4E 54    MEMIS:	DEFM	'CONTENTS ARE:'
+      1755  22EB 45 4E 54 53
+      1755  22EF 20 41 52 45
+      1755  22F3 3A
+      1756  22F4
+      1757  22F4
+      1758  22F4 41 44 44 52    F4MES:	DEFM	'ADDRESS TO CHANGE ____H'
+      1758  22F8 45 53 53 20
+      1758  22FC 54 4F 20 43
+      1758  2300 48 41 4E 47
+      1758  2304 45 20 5F 5F
+      1758  2308 5F 5F 48
+      1759  230B
+      1760  230B
+      1761  230B 43 55 52 52    CUMES:	DEFM	'CURRENTLY:'
+      1761  230F 45 4E 54 4C
+      1761  2313 59 3A
+      1762  2315
+      1763  2315
+      1764  2315 48 20 20 4E    NWMES:	DEFM	'H  NEW:__H'
+      1764  2319 45 57 3A 5F
+      1764  231D 5F 48
+      1765  231F
+      1766  231F
+      1767  231F 57 48 49 43    PRTVW:	DEFM	'WHICH PORT TO VIEW: __H'
+      1767  2323 48 20 50 4F
+      1767  2327 52 54 20 54
+      1767  232B 4F 20 56 49
+      1767  232F 45 57 3A 20
+      1767  2333 5F 5F 48
+      1768  2336
+      1769  2336
+      1770  2336 20 20 56 41    PRVAL:	DEFM	'  VALUE:'
+      1770  233A 4C 55 45 3A
+      1771  233E
+      1772  233E
+      1773  233E 48 20 20 4F    ORMES:	DEFM	'H  OR  '
+      1773  2342 52 20 20
+      1774  2345
+      1775  2345
+      1776  2345 20 20 20 20    CHGPT:	DEFM	'    PORT TO CHANGE  __H '
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  43
+
+
+
+ ERR  LINE  ADDR OBJ
+
+      1776  2349 50 4F 52 54
+      1776  234D 20 54 4F 20
+      1776  2351 43 48 41 4E
+      1776  2355 47 45 20 20
+      1776  2359 5F 5F 48 20
+      1777  235D
+      1778  235D
+      1779  235D 57 48 49 43    TOGMES:	DEFM	'WHICH PORT TO  76543210  TOGGLE: __H'
+      1779  2361 48 20 50 4F
+      1779  2365 52 54 20 54
+      1779  2369 4F 20 20 37
+      1779  236D 36 35 34 33
+      1779  2371 32 31 30 20
+      1779  2375 20 54 4F 47
+      1779  2379 47 4C 45 3A
+      1779  237D 20 5F 5F 48
+      1780  2381
+      1781  2381
+      1782  2381 0F             ROTR:	RRCA
+      1783  2382 0F             	RRCA
+      1784  2383 0F             	RRCA
+      1785  2384 0F             	RRCA
+      1786  2385 C9             	RET
+      1787  2386
+      1788  2386 07             ROTL:	RLCA
+      1789  2387 07             	RLCA
+      1790  2388 07             	RLCA
+      1791  2389 07             	RLCA
+      1792  238A C9             	RET
+      1793  238B
+      1794  238B 3E 30          ZEROUT:	LD A,30H	;DISPLAY A ZERO IN ASCII.
+      1795  238D D3 F4          	OUT 0F4H,A
+      1796  238F C9             	RET
+      1797  2390
+      1798  2390 3E 31          ONEOUT:	LD A,31H	;DISPLAY A ONE IN ASCII.
+      1799  2392 D3 F4          	OUT 0F4H,A
+      1800  2394 C9             	RET
+      1801  2395
+      1802  2395
+      1803  2395                	END
+
+   ASSEMBLER ERRORS =    0
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:26    PAGE  44
+
+
+
+                              CROSS REFERENCE
+
+ LABEL       Value          Reference
+
+ ADDH1       166B             611  -621
+ ADDH2       16AA             639  -648
+ ADDL1       1695             635   638  -640
+ ADDLO       1654             607   610  -612
+ ALLER       1120             137
+ BAK1        14BF             460  -463
+ BAK10       180D             792  -795
+ BAK11       1897             843  -846
+ BAK12       18A5             848  -851
+ BAK13       1A4D            1030 -1033
+ BAK14       1A5B            1035 -1038
+ BAK15       1C26            1211 -1214
+ BAK16       1C34            1216 -1219
+ BAK17       1C8E            1252 -1255
+ BAK18       1C9C            1257 -1260
+ BAK19       1CD5            1279 -1282
+ BAK2        14CD             465  -468
+ BAK20       1CE3            1284 -1287
+ BAK21       1D41            1321 -1324
+ BAK22       1D4F            1326 -1329
+ BAK23       1D97            1356 -1359
+ BAK24       1DA5            1361 -1364
+ BAK25       1EB9            1473 -1476
+ BAK26       1EC7            1478 -1481
+ BAK27       1F3E            1525 -1528
+ BAK28       1F4C            1530 -1533
+ BAK29       1F8B            1555 -1558
+ BAK3        15F6             572  -575
+ BAK30       1F99            1560 -1563
+ BAK31       20DF            1690 -1693
+ BAK32       20ED            1695 -1698
+ BAK4        1604             577  -580
+ BAK5        173D             712  -715
+ BAK6        174B             717  -720
+ BAK7        1780             737  -740
+ BAK8        178E             742  -745
+ BAK9        17FF             787  -790
+ BIT0        1BAF            1160 -1162
+ BIT1        1B94            1151 -1153
+ BIT2        1B79            1142 -1144
+ BIT3        1B5E            1133 -1135
+ BIT4        1B43            1124 -1126
+ BIT5        1B28            1115 -1117
+ BIT6        1B0D            1106 -1108
+ BIT7        1AF2            1097 -1099
+ BITA        1AFC            1099 -1102
+ BITB        1B17            1108 -1111
+
+ BITC        1B32            1117 -1120
+ BITD        1B4D            1126 -1129
+ BITE        1B68            1135 -1138
+ BITF        1B83            1144 -1147
+ BITG        1B9E            1153 -1156
+ BITH        1BB9            1162 -1165
+ BITI        1BCB            1168 -1171  1339
+ BITV        A140             -72  1076  1093  1102  1111  1120  1129  1138
+                             1147  1156  1208  1552  1601  1605  1608  1610
+                             1614  1617  1619  1623  1626  1628  1632  1635
+                             1637  1641  1644  1646  1650  1653  1655  1659
+                             1662  1664  1668  1671  1674
+ CHGPT       2345            1236 -1776
+ CHGV1       1759             722  -725
+ CHGV2       179C             747  -750
+ CHGV3       17AA             752  -755
+ CHGV6       181B             797  -800
+ CHGV7       1829             802  -805   831
+ CHGV8       1833             805  -808
+ CHGVA       1772             569  -735
+ CHGVB       1642            -604   769  1077  1226  1315
+ CHGVC       17CF             658   664  -771
+ CHREC       1000              26   -79
+ CHVAL       16FF             120  -689
+ CHVAL0      170D             691  -696
+ CLEAR       1202             106  -186   237   263   289   315   341   367
+                              393   416   483   495   526   547   675   810
+                              822   869   893  1176  1599
+ COUNT       A138             -70   219   226   228   245   252   254   271
+                              278   280   297   304   306   323   330   332
+                              349   356   358   375   382   384   401   408
+                              410   446   453   455   592   599   601   698
+                              705   707   757   764   766   773   780   782
+                              904   906   928   936   944   952   960   968
+                              976   984   992  1000  1016  1023  1025  1060
+                             1067  1069  1081  1088  1090  1238  1245  1247
+                             1299  1306  1308  1511  1518  1520
+ CUMES       230B             755  1297 -1761
+ DATPR       215B            1001 -1725
+ DEC1        1D7F             674   868 -1349
+ DEC2        1DC1            1371 -1374
+ DECPT1      1E99            1175 -1463  1582
+ DELAY       193C             910  -913
+ DISPLAY   E 0001              27   145   149   153   157   161
+ DISPLAYC  E 0002              27   144   148   152   156   160
+ ERDIS       1077             109  -131
+ ESIRLY    E 0000              27   107   131
+ F1DAT       211B             937 -1717
+ F21A        128A             240  -243
+ F21B        129F             248  -251
+ F21C        12B6             257  -260
+ F21D        12C0             262  -264
+ F2DAT       2123             945 -1718
+ F2MES       22D0             444 -1752
+
+ F3DAT       212B             953 -1719
+ F4DAT       2133             961 -1720
+ F4MES       22F4             696 -1758
+ F5DAT       213B             969 -1721
+ F6DAT       2143             977 -1722
+ F71         13D0             366  -368
+ F7A         13DE             370  -373
+ F7B         13F3             378  -381
+ F7C         140A             387  -390
+ F7D         1414             392  -394
+ F7DAT       214B             985 -1723
+ F8A         1422             396  -399
+ F8B         1437             404  -407
+ F8C         144E             413  -416
+ F8DAT       2153             993 -1724
+ FINISH      19FC             892  -999
+ FIVRES      2036            1621 -1625
+ FORRES      204E            1630 -1634
+ FST         1012              84   -87
+ GOHIER      115F             135
+ GOLOER      119E             133
+ HELP        1238             112  -212
+ HELP1       1246             214  -217
+ HELP2       1272             231  -234
+ HELPF2      2190             243 -1731
+ HELPF7      2272             373 -1746
+ HELPF8      22A1             399 -1749
+ HILOER      1094             141
+ INC1        1D75             672   866 -1344
+ INC2        1DB3            1366 -1369
+ INCDC0      1D89            1347  1352 -1354
+ INCDC2      1DDA            1381 -1384
+ INCDC3      1DDD            1383 -1385  1495  1709
+ INCDC4      1E00            1397 -1400
+ INCDC5      1E17            1406 -1409
+ INCDC6      1E3F            1424 -1427
+ INCDC7      1E54            1432 -1435
+ INCDC8      1E55            1427 -1436
+ INCDC9      1DCC           -1379  1448
+ INCDCA      1E78            1445 -1449
+ INCDCB      15CE            -561  1453
+ INCPT1      1E87            1173 -1455  1580
+ INDCH1      1E03            1391 -1401
+ INDCH2      1E42            1419 -1428
+ INDCL0      1DEC            1387  1390 -1392
+ INDCL1      1E2D            1415  1418 -1420
+ JUMP1       A12C             -67    85   425
+ JUMP2       A130             -68    90   197
+ JUMP3       A14C             -75    95  1183
+ LOCA        A134             -69   208   215   223   232   241   249   258
+                              267   275   284   293   301   310   319   327
+                              336   345   353   362   371   379   388   397
+                              405   414   417   436   442   450   461   466
+                              471   476   479   489   500   520   531   541
+
+                              552   564   573   578   583   588   596   618
+                              627   645   653   666   692   702   713   718
+                              723   728   738   743   748   753   761   777
+                              788   793   798   803   806   816   827   844
+                              849   854   859   862   894  1011  1020  1031
+                             1036  1041  1046  1064  1085  1100  1109  1118
+                             1127  1136  1145  1154  1163  1212  1217  1222
+                             1227  1233  1242  1253  1258  1263  1268  1280
+                             1285  1290  1295  1303  1322  1327  1332  1337
+                             1340  1357  1362  1367  1372  1398  1407  1425
+                             1433  1474  1479  1484  1489  1507  1515  1526
+                             1531  1536  1541  1556  1561  1566  1571  1575
+                             1680  1691  1696  1701  1706
+ MEMIS       22E7             590 -1755
+ MEMORY    M 0000               0
+ MESS1       2162             217 -1728
+ MESS2       21BC             269 -1734
+ MESS3       221A             295 -1740
+ MESS4       21EB             321 -1737
+ MESS5       2249             347 -1743
+ MORE2       127C             236  -238
+ MORE2A      12CE             266  -269
+ MORE2B      12FA             283  -286
+ MORE3       1304             288  -290
+ MORE3A      1312             292  -295
+ MORE3B      133E             309  -312
+ MORE4       1348             314  -316
+ MORE4A      1356             318  -321
+ MORE4B      1382             335  -338
+ MORE5A      138C             340  -342
+ MORE5B      139A             344  -347
+ MORE5C      13C6             361  -364
+ MVIE1       148F             441  -444
+ MVIEW       1481             116  -439
+ MVIEWA      14DB             470  -473
+ MVIEWB      14F2             478  -481
+ MVIEWC      150F             488  -492
+ MVIEWD      1565             519  -523
+ MVIEWE      15A1             540  -544
+ MVIEWF      15DC             563  -566
+ MVIEWG      1612             582  -585
+ MVIEWH      1620             587  -590
+ MVIEWI      1668             617  -620
+ MVIEWJ      167F             626  -629
+ MVIEWK      16A7             644  -647
+ MVIEWL      16BC             652  -655
+ MVIEWM      16E2             665  -670
+ NARG        0000               0
+ NDEL3       1535             497  -505
+ NDEL4       152E             499  -503
+ NDEL5       14E9             475  -478   504   733  1051  1273  1546
+ NDEL6       1587             528  -535
+ NDEL7       1580             530  -533
+ NDEL8       1502            -488   534
+
+ NDEL9       15C3             549  -556
+ NDELA       15BC             551  -554
+ NDELB       1558            -519   555
+ NONER       10DB             139
+ NV1         18B3             853  -856
+ NV2         18C1             858  -861
+ NV3         18CB             861  -864
+ NVAL1       1876             824  -832
+ NVALA       1850             815  -819
+ NVALB       186F             826  -830
+ NWMES       2315             771 -1764
+ NXT         1036             101  -103
+ ONEOUT      2390            1096  1105  1114  1123  1132  1141  1150  1159
+                            -1798
+ ONERES      2096            1657 -1661
+ ORMES       233E            1079 -1773
+ OUT1        125B             222  -225
+ OUT10       1722             701  -704
+ OUT11       17BF             760  -763
+ OUT12       17D7            -774   784
+ OUT2        12E3             274  -277
+ OUT3        1327             300  -303
+ OUT4        136B             326  -329
+ OUT5        14A4             449  -452
+ OUT6        1635             595  -598
+ OUTA        124E            -220   230
+ OUTAT       13AF             352  -355
+ OUTB        12D6            -272   282
+ OUTC        131A            -298   308
+ OUTD        135E            -324   334
+ OUTE        1497            -447   457
+ OUTEN       16BD             647  -656
+ OUTF        1628            -593   603
+ OUTF2       1292            -246   256
+ OUTF7       13E6            -376   386
+ OUTF8       142A            -402   412
+ OUTG        1715            -699   709
+ OUTH        17B2            -758   768
+ OUTI        17E4             776  -779
+ OUTIT       13A2            -350   360
+ OUTPA       1A25           -1017  1027
+ OUTPB       1A32            1019 -1022
+ OUTPC       1A69            1040 -1043
+ OUTPC1      1C66           -1239  1249
+ OUTPC2      1C73            1241 -1244
+ OUTPC3      1CAA            1262 -1265
+ OUTPC4      1CB8            1267 -1270
+ OUTPD       1A77            1045 -1048
+ OUTTOG      1F16           -1512  1522
+ PCHG        1C50             122 -1230
+ POLL        1458             233   259   285   311   337   363   389   415
+                             -421   424   480   491   522   543   669   807
+                              818   863   897  1341  1576
+ POLL1       1475             423  -433
+
+ POLLA       1BDA            1170 -1179  1182
+ POLLB       1C05            1181 -1199
+ PORV        A144             -73  1057  1072  1190  1276  1311  1316  1455
+                             1457  1463  1465  1494  1496  1549  1676  1684
+                             1708  1711
+ PRBAK       191E            -900   911   933   941   949   957   965   973
+                              981   989   997  1005
+ PRDAT       2116             929 -1716
+ PRF1        1964             876  -935
+ PRF2        1977             878  -943
+ PRF3        198A             880  -951
+ PRF4        199D             882  -959
+ PRF5        19B0             884  -967
+ PRF6        19C3             886  -975
+ PRF7        19D6             888  -983
+ PRF8        19E9             890  -991
+ PROC        16F1             485   507   537   557  -679   812   833
+ PRTT5       18DA             124  -872   908
+ PRTVW       231F            1014 -1767
+ PRVAL       2336            1058 -1770
+ PRWAIT      1951             874  -927
+ PTCHG       1C5E            1232 -1236
+ PTCHG1      1CC3             515 -1275  1500
+ PTCHG2      1D07           -1300  1310
+ PTCHG3      1D14            1302 -1305
+ PTCHG4      1D2D             838 -1316
+ PTCHG5      1D5D            1331 -1334
+ PTCHG6      1D6B            1336 -1339
+ PTCHG8      1CF1            1289 -1292
+ PTCHG9      1CFF            1294 -1297
+ PTDIF1      1C11            1196 -1206
+ PTDIF2      1C42            1221 -1224
+ PTID        1EAB            1460  1468 -1471
+ PTID2       1ED5            1483 -1486
+ PTID3       1EE3            1488 -1491
+ PTID4       1EF1            1441 -1496
+ PTPL        A148             -74  1169  1202
+ PTVIEW      1A0F             118 -1008
+ PTVW2       1A82             512 -1053  1501
+ PTVW2A      1A96           -1061  1071
+ PTVW2B      1AA3            1063 -1066
+ PTVW3       1ABF             661 -1079
+ PTVW3A      1AC7           -1082  1092
+ PTVW3B      1AD4            1084 -1087
+ ROTL        2386             486   538   632   813  1412 -1788
+ ROTR        2381             614   623   641   649  1394  1403  1421  1429
+                            -1782
+ SCND        1E18            1400 -1410
+ SECD        1680             620  -630
+ SEVRES      2006            1603 -1607
+ SIOI        11DD              26  -166
+ SIXRES      201E            1612 -1616
+ SND         101E              89   -92
+ SPOT        A154             -77   104   110
+
+ STACK     S 0000               0
+ SVBC        A13C             -71    79   128   203   431  1189
+ THRRES      2066            1639 -1643
+ TOGFIV      2026            1588 -1619
+ TOGFOR      203E            1590 -1628
+ TOGG0       1F0E            1506 -1509
+ TOGG1       1F23            1514 -1517
+ TOGG2       1F5A            1535 -1538
+ TOGG3       1F68            1540 -1543
+ TOGG4       1F73             518 -1548  1686  1713
+ TOGG5       1FA7            1565 -1568
+ TOGG6       1AE1           -1093  1570
+ TOGG7       1FB5            1167 -1574
+ TOGG8       1FBF            1574 -1578
+ TOGG9       20CA            1679 -1684
+ TOGGLE      1F00             114 -1504
+ TOGLO0      20D1            1461  1469 -1688
+ TOGLO1      20FB            1700 -1703
+ TOGLO2      2109            1705 -1708
+ TOGLO3      210F            1438 -1711
+ TOGMES      235D            1509 -1779
+ TOGONE      2086            1596 -1655
+ TOGOUT      20B6            1606  1609  1615  1618  1624  1627  1633  1636
+                             1642  1645  1651  1654  1660  1663  1669  1672
+                            -1674
+ TOGSEV      1FF6            1584 -1601
+ TOGSIX      200E            1586 -1610
+ TOGTHR      2056            1592 -1637
+ TOGTWO      206E            1594 -1646
+ TOGV        A150             -76   190   516  1165  1436  1458  1466  1543
+                             1545
+ TOGZRO      209E            1598 -1664
+ TRD         102A              94   -97
+ TT5MEM      A100             -56    57    58    59    60    61    62    63
+                               64    65    66    67    68    69    70    71
+                               72    73    74    75    76    77
+ TT5WAIT     193F            -914   919   922
+ TWORES      207E            1648 -1652
+ UNDER       16FB             681  -685
+ V1CHG       1767             727  -730
+ VAL1        A104              26   -57   562   604  1075  1194  1207  1314
+ VAL10       A128              26   -66   872   896   932   940   948   956
+                              964   972   980   988   996  1004
+ VAL2        A108              26   -58    82    87    92   189   198   200
+                              205   207   426   428   433   435   510   513
+                              567   656   659   662   730   732   836  1048
+                             1050  1053  1055  1184  1186  1199  1201  1270
+                             1272  1379  1439  1442  1443  1447  1449  1451
+                             1491  1493  1498
+ VAL3        A10C             -59   490   492   501   503   521   523   542
+                              544   566   817   819   828   830
+ VAL4        A110             -60   505   533
+ VAL5        A114             -61   535   554
+ VAL6        A118             -62   560   839  1344  1346  1349  1351  1374
+
+                             1452
+ VAL7        A11C             -63   900   909   930   938   946   954   962
+                              970   978   986   994  1002
+ VAL8        A120             -64  1376  1382
+ VAL9        A124             -65  1378  1384
+ VIEWPT      1A1D            1010 -1014
+ W0000       109D             144   144
+ W0001       10C0             145   145
+ W0002       10E4             148   148
+ W0003       1107             149   149
+ W0004       1129             152   152
+ W0005       114C             153   153
+ W0006       1168             156   156
+ W0007       118B             157   157
+ W0008       11A7             160   160
+ W0009       11CA             161   161
+ W20000      10B6             144   144   144
+ W20001      10D9             145   145   145
+ W20002      10FD             148   148   148
+ W20003      111E             149   149   149
+ W20004      1142             152   152   152
+ W20005      115D             153   153   153
+ W20006      1181             156   156   156
+ W20007      119C             157   157   157
+ W20008      11C0             160   160   160
+ W20009      11DB             161   161   161
+ W30000      109E             144   144
+ W30001      10C1             145   145
+ W30002      10E5             148   148
+ W30003      1108             149   149
+ W30004      112A             152   152
+ W30005      114D             153   153
+ W30006      1169             156   156
+ W30007      118C             157   157
+ W30008      11A8             160   160
+ W30009      11CB             161   161
+ WAITL       120F            -193   196   216   224   242   250   268   276
+                              294   302   320   328   346   354   372   380
+                              398   406   418   443   451   462   467   472
+                              477   502   532   553   565   574   579   584
+                              589   597   619   628   646   654   693   703
+                              714   719   724   729   739   744   749   754
+                              762   778   789   794   799   804   829   845
+                              850   855   860  1012  1021  1032  1037  1042
+                             1047  1065  1086  1101  1110  1119  1128  1137
+                             1146  1155  1164  1213  1218  1223  1228  1234
+                             1243  1254  1259  1264  1269  1281  1286  1291
+                             1296  1304  1323  1328  1333  1338  1358  1363
+                             1368  1373  1399  1408  1426  1434  1475  1480
+                             1485  1490  1508  1516  1527  1532  1537  1542
+                             1557  1562  1567  1572  1681  1692  1697  1702
+                             1707
+ WAITL1      122C             195  -205
+ WRITE     $                  -33   144   145   148   149   152   153   156
+
+                              157   160   161
+ ZERO1       1AEF            1095 -1098
+ ZERO2       1B0A            1104 -1107
+ ZERO3       1B25            1113 -1116
+ ZERO4       1B40            1122 -1125
+ ZERO5       1B5B            1131 -1134
+ ZERO6       1B76            1140 -1143
+ ZERO7       1B91            1149 -1152
+ ZERO8       1BAC            1158 -1161
+ ZEROUT      238B            1098  1107  1116  1125  1134  1143  1152  1161
+                            -1794
+ ZRORES      20AE            1666 -1670
+
+

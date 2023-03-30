@@ -1,0 +1,101 @@
+               Microtec LODZ80 Ver 4.4f        Aug-17-89  14:14
+ 
+ 
+   **LOADER COMMANDS
+ 
+ 
+ LOAD MAIN.OBJ,PULSE.OBJ,TIMERS.OBJ,TT5COMM.OBJ,DISPLAY.OBJ
+ LIST R,T,X
+ END
+  **LOAD MAP**
+ 
+     MODULE                                CODE  DATA  EXTRA
+ 
+     TESTMARK                              0000  0000  0000
+     PULSE                                 0000  0000  0000
+     TIMERS                                0000  0000  0000
+     COMM                                  0000  0000  0000
+     DISPLAY                               0000  0000  0000
+     //                                    0000  0000  0000
+     STACK                                 0000
+     //                                    0000
+     MEMORY                                0000
+     //                                    0000
+ 
+ 
+     ABSOLUTE SEGMENTS
+ 
+                                           0000  0002
+                                           0038  004F
+                                           0062  0065
+                                           0100  04BD
+                                           0500  074F
+                                           0800  0D00
+                                           1000  2394
+                                           2400  25A4
+ 
+ 
+   **ENTRY POINT    0000H
+ 
+ 
+   **Load completed
+
+ 
+ 
+ 
+   **LOCAL SYMBOLS
+ 
+ 
+ 
+  **CROSS REFERENCE TABLE
+ 
+  LABEL                            VALUE    REFERENCE
+ 
+ AIRCNT                          A A00E     
+ AIRDWN                          A A03E     
+ BEEPCNT                         A A044     
+ BOWLCNT                         A A010     
+ BOWLDWN                         A A032     
+ CALREG                          A A020     
+ CHREC                           A 1000     
+ CURCNT                          A A004     
+ DISINIT                         A 2404     
+ DISPLAY                         A 24D6     
+ DISPLAYC                        A 24D1     
+ DISPLAYN                        A 24FD     
+ DISPOLL                         A 2400     
+ ERRREG                          A A02A     
+ ESICNT                          A A014     
+ ESIDWN                          A A036     
+ ESIRLY                          A A02C     
+ JOGCNT                          A A01C     
+ KICKCNT                         A A00A     
+ MCRCNT                          A A016     
+ MCRDWN                          A A038     
+ MEMCNT                          A A002     
+ OUTCNT                          A A012     
+ OUTDWN                          A A034     
+ OVENDWN                         A A03C     
+ OVENTME                         A A01A     
+ PARTCNT                         A A008     
+ PORT04                          A A042     
+ PORT06                          A A040     
+ PULSE                           A 0500     
+ REG1                            A A026     
+ REG2                            A A028     
+ RUNREG                          A A01E     
+ SHIFT1                          A A02E     
+
+ SHIFT2                          A A030     
+ SIOI                            A 11DD     
+ SLOWCNT                         A A018     
+ SLOWDWN                         A A03A     
+ STKSZ                           A 0000     
+ STOPCNT                         A A00C     
+ STPREG                          A A024     
+ TESTCNT                         A A006     
+ TIMEREG                         A A022     
+ UPDATE                          A 0800     
+ VAL1                            A A104     
+ VAL10                           A A128     
+ VAL2                            A A108     

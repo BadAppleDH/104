@@ -1,0 +1,622 @@
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   1
+
+
+
+ ERR  LINE  ADDR OBJ
+
+         1  0000
+         2                      		;      >>>>>>>>>>>    PULSE MODULE	<<<<<<<<<<<
+         3  0000
+         4                      	NAME	PULSE
+         5                      	ORG	0500H
+         6  0500
+         7  0500
+         8                      	EXTRN	CALREG,REG1,REG2,TIMEREG,CURCNT,MEMCNT,ESICNT,RUNREG,ESIRLY
+         9                      	EXTRN	SHIFT1,SHIFT2,STOPCNT,STPREG,OUTCNT,BOWLCNT,JOGCNT,PARTCNT
+        10                      	EXTRN	KICKCNT,TESTCNT,PORT06,ESIDWN,BOWLDWN,OUTDWN,PORT04
+        11                      	EXTRN	SLOWCNT,SLOWDWN,OVENTME,OVENDWN,ERRREG
+        12  0500
+        13  0500
+        14  0500
+        15                      	GLOBAL	PULSE
+        16  0500
+        17                                   	;********************************************************
+        18                      		;*							*
+        19                      		;*		THIS PULSE MODULE IS CALLED BY  	*
+        20                      		;*    	THE PULSE INTERUPT TO CHECK THE VALIDITY	*
+        21                      		;*	OF THE PULSE AND THE DIRECTION OF THE		*
+        22                      		;*	OF THE ENCODER.  IF THE ENCODER IS   		*
+        23                      		;*	MOVING IN THE FORWARD DIRECTION A COUNT		*
+        24                      		;*	WILL BE INCREMENTED.  THIS RUNNING COUNT 	*
+        25                      		;*	WILL BE COMPARED WITH SET VALUES TO KNOW	*
+        26                      		;*	WHEN TO START A TEST CYCLE AND WHEN TO		*
+        27                      		;*	EJECT A BAD PART.  WHEN THE PULSE COUNT		*
+        28                      		;*	REACHES 360 DEGREES (168H) THE COUNT WILL	*
+        29                      		;*	BE RESET TO 0.  WHEN THE ENCODER IS TURNING	*
+        30                      		;*	IN REVERSE THE LAST FORWARD COUNT IS SAVED	*
+        31                      		;*	AND THE CURRENT COUNT IS DECREMENTED.  NO	*
+        32                      		;*	OPERATIONS ARE PERFORMED IN THE REVERSE		*
+        33                      		;*	DIRECTION.  WHEN THE DIRECTION BEGINS MOVING	*
+        34                      		;*	FORWARD AFTER HAVING BEEN TRAVELING IN THE 	*
+        35                      		;*	REVERSE DIRECTION THE COUNT IS INCREMENTED	*
+        36                      		;*	BUT NO OPERATIONS ARE PERFORMED UNTIL THE 	*
+        37                      		;*	CURRENT COUNT HAS REACHED THE VALUE WHICH	*
+        38                      		;*	WAS SAVED WHEN THE ENCODER BEGAN TO TRAVEL	*
+        39                      		;*	IN THE REVERSE DIRECTION.  THIS PROHIBITS 	*
+        40                      		;*	ANY OPERATION FROM BEING REPEATED TWICE IN	*
+        41                      		;*	THE SAME 360 DEGREE CYCLE.			*
+        42                      		;********************************************************
+        43  0500
+        44  0500
+        45  0500
+        46  0500 F5             PULSE:	PUSH	AF		;SAVE THE REGISTERS FROM THE MAIN PROGRAM
+        47  0501 C5             	PUSH	BC
+        48  0502 D5             	PUSH	DE
+        49  0503 E5             	PUSH	HL
+        50  0504 3A 00 00    E  	LD	A,(CALREG)
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   2
+
+
+
+ ERR  LINE  ADDR OBJ
+
+        51  0507 CB 57          	BIT	2,A		;CHECK TO SEE IF IN CALIBRATION PROCESS
+        52  0509 CA 14 05       	JP	Z,APULSE	;IF SO LEAVE THE PULSE ROUTINE
+        53  050C 3A 00 00    E  	LD	A,(REG1)	;CHECK IF EMERGENCY STOP OCCURED
+        54  050F CB 47          	BIT	0,A		
+        55  0511 CA 6A 05       	JP	Z,NOPUL		
+        56  0514 DB 05          APULSE:	IN 	A,05H
+        57  0516 CB 5F          	BIT	3,A		;CHECK DIRECTION OF ENCODER.
+        58  0518 CA 70 05       	JP	Z,BACKUP	;IF IN REVERSE DIRECTION JUMP **CHK BIT**
+        59  051B 3A 00 00    E  	LD	A,(REG1)
+        60  051E CB 5F          	BIT	3,A		;CHECK IF REVERSE MEMORY BIT IS SET.
+        61  0520 CA 3D 05       	JP	Z,CNTINC
+        62  0523 2A 00 00    E  	LD	HL,(CURCNT)	;LOAD THE CURRENT PULSE COUNT TO COMPARE
+        63  0526 ED 5B 00 00 E  	LD	DE,(MEMCNT)	;LOAD THE LAST FORWARD COUNT VALUE
+        64  052A ED 52          	SBC	HL,DE		;CURRENT COUNT - LAST FORWARD COUNT = ?
+        65  052C FA 9A 05       	JP	M,RETINC	;IF ? IS NEGATIVE JUMP TO INC AND RETI.
+        66  052F CA 35 05       	JP	Z,INCRET	;IF ? IS ZERO JUMP TO INC AND RETI.
+        67  0532 C3 9A 05       	JP	RETINC		;THIS LINE AND ONE ABOVE WERE ADDED&&&&&&&&&&
+        68  0535 3A 00 00    E  INCRET:	LD	A,(REG1)	;RESET THE REVERSE MEMORY BIT IF THE
+        69  0538 CB 9F          	RES	3,A		;CURRENT COUNT IS NOW LARGER THAN THE
+        70  053A 32 00 00    E  	LD	(REG1),A	;LAST FORWARD COUNT BEFORE REVERSING.
+        71  053D
+        72                      			;************************************************
+        73                      			;*	THIS ROUTINE IS JUMPED TO, TO INCREMENT	*
+        74                      			;*  THE POSITION COUNT WHEN THE MACHINE IS IN 	*
+        75                      			;*  THE FORWARD MOVING DIRECTION AND THE REVERSE*
+        76                      			;*  MEMORY FLAG IS NO LONGER SET.  SEVERAL 	*
+        77                      			;*  ROUTINES ARE CALLED TO COMPARE THE CURRENT	*
+        78                      			;*  POSITION COUNT WITH THE COUNTS THAT INVOLVE	*
+        79                      			;*  THE PROCESSES TO BE PERFORMED.  WHEN A COUNT*
+        80                      			;*  COMPARES EQUAL TO THE CURRENT COUNT AND THE	*
+        81                      			;*  CONDITION FLAGS ARE MET THE CORRESPONDING   *
+        82                      			;*  ROUTINE WILL BE PERFORMED.  THE PROGRAM WILL*
+        83                      			;*  THEN RESTORE THE REGISTERS AND RETURN TO THE*
+        84                      			;*  MAIN PROGRAM.				*
+        85                      			;************************************************
+        86  053D 2A 00 00    E  CNTINC:	LD	HL,(CURCNT)	;INCREMENT THE CURRENT COUNT
+        87  0540 23             	INC	HL
+        88  0541 22 00 00    E  	LD	(CURCNT),HL
+        89  0544 C3 47 05       	JP	TESTBT
+        90  0547
+        91  0547 3A 00 00    E  TESTBT:	LD	A,(REG1)
+        92  054A CB 47          	BIT	0,A		;DID E. STOP OCCUR
+        93  054C CA 55 05       	JP	Z,BTTEST
+        94  054F CD D6 05       	CALL	KICKIT
+        95  0552 C3 6A 05       	JP	NOPUL
+        96  0555 CD 23 06       BTTEST:	CALL	STOPIT
+        97  0558 CD A4 05       	CALL	TESTIT
+        98  055B CD E3 06       	CALL	PARTIT
+        99  055E CD D6 05       	CALL	KICKIT
+       100  0561 CD C7 06       	CALL	JOGIT
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   3
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       101  0564 CD 10 06       	CALL	ZEROIT
+       102  0567 CD 42 07       	CALL	OVENP
+       103  056A E1             NOPUL:	POP	HL
+       104  056B D1             	POP	DE
+       105  056C C1             	POP	BC
+       106  056D F1             	POP	AF
+       107  056E ED 4D          	RETI
+       108  0570
+       109                          			;************************************************
+       110                          			;*	THIS ROUTINE WILL BE JUMPED TO IF THE 	*
+       111                          			;*  MACHINE IS RUNNING IN THE REVERSE DIRECTION.*
+       112                          			;*  IF THE REVERSE MEMORY BIT (INDICATES THE 	*
+       113                          			;*  MACHINE IS RUNNING IN REVERSE SO NO 	*
+       114                          			;*  OPERATIONS WILL OCCUR) IS SET, THE CURRENT	*
+       115                              		;*  COUNT IS DECREMENTED AND THE PROGRAM JUMPS	*
+       116                          			;*  TO THE END TO RESTORE THE REGISTERS AND RETI*
+       117                          			;*	IF THE REVERSE FLAG WAS NOT SET,  IT 	*
+       118                          			;*  WILL BE SET, THE CURRENT COUNT STORED, AND	*
+       119                          			;*  THEN THE COUNT WILL BE DECREMENTED AND THE	*
+       120                          			;*  PROGRAM WILL JUMP TO THE END OF THE ROUTINE	*
+       121                          			;*  TO RESTORE THE REGISTERS AND RETI.		*
+       122                             			;************************************************
+       123  0570
+       124  0570 3A 00 00    E  BACKUP:	LD	A,(REG1)	;CHECK THE REVERSE MEMORY BIT.
+       125  0573 CB 5F          	BIT	3,A
+       126  0575 CA 82 05       	JP	Z,NOBACK	;IF NOT SET, JUMP TO SET IT AND LOAD REGISTERS
+       127  0578 2A 00 00    E  	LD	HL,(CURCNT)	;REVERSE BIT SET SO DECREMENT COUNT AND
+       128  057B 2B             	DEC	HL		;JUMP TO END OF MODULE
+       129  057C 22 00 00    E  	LD	(CURCNT),HL
+       130  057F C3 6A 05       	JP	NOPUL
+       131  0582
+       132  0582 3A 00 00    E  NOBACK:	LD	A,(REG1)	;MACHINE IS NOW REVERSING SO SET BIT.
+       133  0585 CB DF          	SET	3,A
+       134  0587 32 00 00    E  	LD	(REG1),A
+       135  058A 2A 00 00    E  	LD	HL,(CURCNT)	;STORE THE CURRENT COUNT IN THE REVERSE
+       136  058D 22 00 00    E  	LD	(MEMCNT),HL	;COUNT MEMORY LOCATION FOR FUTURE COMPARISONS.
+       137  0590 2A 00 00    E  	LD	HL,(CURCNT)	;DECREMENT THE CURRENT COUNT
+       138  0593 2B             	DEC	HL
+       139  0594 22 00 00    E  	LD	(CURCNT),HL
+       140  0597 C3 6A 05       	JP	NOPUL
+       141  059A
+       142                          			;************************************************
+       143                          			;*	THIS ROUTINE WILL BE JUMPED TO IF THE 	*
+       144                          			;*  MACHINE IS RUNNING IN THE FORWARD DIRECTION	*
+       145                             			;*  BUT THE CURRENT COUNT IS STILL LESS THAT THE*
+       146                          			;*  MEMORY COUNT THAT WAS SET WHEN THE MACHINE	*
+       147                          			;*  FIRST STARTED TO GO IN THE REVERSE DIRECTION*
+       148                          			;*	THE COUNT WILL BE INCREMENTED BUT NO	*
+       149                          			;*  COMPARISONS WILL BE MADE.  THIS WILL 	*
+       150                          			;*  PROHIBIT ANY REPEAT STEPS DURING ONE MACHINE*
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   4
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       151                          			;*  CYCLE.  THE PROGRAM WILL THEN JUMP TO 	*
+       152                             			;*  RESTORE THE REGISTERS AND RETURN.		*
+       153                          			;************************************************
+       154  059A
+       155  059A 2A 00 00    E  RETINC:	LD	HL,(CURCNT)	;MOVING FORWARD BUT NOT PAST THE LAST
+       156  059D 23             	INC	HL		;FORWARD COUNT SO INCREMENT THE CURRENT
+       157  059E 22 00 00    E  	LD	(CURCNT),HL	;COUNT AND JUMP TO END OF THE MODULE.
+       158  05A1 C3 6A 05       	JP	NOPUL
+       159  05A4                    		
+       160                          			;************************************************
+       161                          			;*	THIS ROUTINE IS CALLED TO CHECK IF IT 	*
+       162                          			;*  IS TIME FOR THE MACHINE TO START THE TEST 	*
+       163                          			;*  PROCEDURE.  				*
+       164                          			;*   	IF THE MACHINE IS ALREADY TAKING A TEST	*
+       165                          			;*  THE ROUTINE WILL RETURN FROM THE CALL.	*
+       166                          			;*	THIS ROUTINE WILL COMPARE A VALUE THAT	*
+       167                          			;*  WAS ENTERED BY THE TT5 TO THE CURRENT COUNT	*
+       168                          			;*  AND IF THE TWO VALUES ARE NOT EQUAL THE 	*
+       169                          			;*  ROUTINE WILL RETURN FROM THE CALL.		*
+       170                          			;*	IF THE NUMBERS DO COMPARE THE TESTON	*
+       171                          			;*  WILL BE CALLED.  WHEN IT RETURNS THE 	*
+       172                          			;*  PROGRAM WILL RETURN FROM THE CALL BACK TO 	*
+       173                          			;*  THE PULSE ROUTINE.				*
+       174                          			;************************************************
+       175  05A4 3A 00 00    E  TESTIT:	LD	A,(RUNREG)	;CHECK TO SEE IF THE MACHINE IS ALREADY
+       176  05A7 CB 57          	BIT	2,A		;TESTING A PART.
+       177  05A9 C0             	RET	NZ		;IF IT IS THEN RETURN.
+       178  05AA 2A 00 00    E  	LD	HL,(CURCNT)
+       179  05AD ED 5B 00 00 E  	LD	DE,(TESTCNT)	
+       180  05B1 7A             	LD	A,D
+       181  05B2 BC             	CP 	H		;CHECK IF IT IS TIME TO START THE TEST
+       182  05B3 C0             	RET	NZ		;SEQUENCE BY COMPARING THE CURRENT COUNT
+       183  05B4 7B             	LD	A,E		;TO THE TEST COUNT LOCATION VALUE.
+       184  05B5 BD             	CP	L		;IF IT IS NOT THEN RETURN, IF IT IS, START
+       185  05B6 C0             	RET	NZ		;THE TEST PROCEDURE.
+       186  05B7 CD BB 05       	CALL	TESTON
+       187  05BA C9             	RET
+       188  05BB
+       189                          			;************************************************
+       190                          			;*	THIS ROUTINE WILL SET THE COMM2 SWITCH	*
+       191                          			;*  LEAD IN THE ESI BRIDGE AND RESET THE 	*
+       192                          			;*  NORMALLY OPEN LEAD IN THE ESI BRIDGE.  THIS	*
+       193                          			;*  WILL START THE TEST CYCLE.  THE ROUTINE WILL*
+       194                          			;*  ALSO LOAD THE 10mS COUNT VALUE FOR THE TIMER*
+       195                          			;*  ROUTINE AND THE TEST REQUEST FLAG.		*
+       196                          			;************************************************
+       197  05BB 3A 00 00    E  TESTON:	LD	A,(PORT04)	;SET THE COMM2 CONTACT OF THE ESI BRIDGE.
+       198  05BE CB F7          	SET	6,A
+       199  05C0 CB BF          	RES	7,A		;RESET THE N.O. CONTACT OF THE ESI BRIDGE.
+       200  05C2 D3 04          	OUT 	04H,A
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   5
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       201  05C4 32 00 00    E  	LD	(PORT04),A
+       202  05C7 3A 00 00    E  	LD	A,(RUNREG)	;TIME TO TEST.  SET THE TEST REQUEST BIT.
+       203  05CA CB D7          	SET	2,A
+       204  05CC 32 00 00    E  	LD	(RUNREG),A
+       205  05CF 3A 00 00    E  	LD	A,(ESICNT)	;LOAD THE 10mS TIME CONSTANT VALUE.
+       206  05D2 32 00 00    E  	LD	(ESIDWN),A
+       207  05D5 C9             	RET
+       208  05D6
+       209                          			;************************************************
+       210                          			;*	THIS ROUTINE IS CALLED TO CHECK IF IT	*
+       211                          			;* IS TIME FOR THE BAD PART KICKOUT SEQUENCE TO	*
+       212                          			;*  BEGIN.					*
+       213                          			;*	THE ROUTINE FIRST CHECKS IF THE TEST	*
+       214                             			;*  HAS BEEN DONE TO DETERMINE IF A PART IS 	*
+       215                      			;*  PRESENT IN THE CHAIN OR NOT.  THE ROUTINE	*
+       216                          			;*  WILL THEN CHECK IF THE TEST IS ALREADY 	*
+       217                          			;*  BEING DONE.  THIS MAKES SURE THE TEST WILL	*
+       218                          			;*  NOT BE DONE TWICE DURING THE SAME CYCLE.	*
+       219                          			;*  THE COUNT IS THEN COMPARED TO SEE IF THE 	*
+       220                          			;*  MACHINE IS IN THE CORRECT LOCATION TO KICK	*
+       221                          			;*  THE PART OUT.  THE ROUTINE WILL THEN CHECK	*
+       222                          			;*  IF THE PART IS GOOD OR BAD.  IF THE PART	*
+       223                          			;*  WAS GOOD THE KICKOUT PROCEDURE WILL NOT BE	*
+       224                          			;*  PERFORMED.  IF ALL OF THE CONDITION TESTS	*
+       225                          			;*  PASS A ROUTINE WILL BE CALLED TO START THE	*
+       226                          			;*  THE PROCEDURE.  WHEN THE ROUTINE RETURNS	*
+       227                          			;*  THE PART THERE FLAG IS RESET.		*
+       228                          			;*	THE PROGRAM WILL THEN RETURN TO PULSE.	*
+       229                          			;************************************************
+       230  05D6
+       231  05D6 2A 00 00    E  KICKIT:	LD	HL,(CURCNT)
+       232  05D9 ED 5B 00 00 E  	LD	DE,(KICKCNT)	;CHECK TO SEE IF IT IS TIME TO EJECT THE
+       233  05DD 7A             	LD	A,D		;PART.
+       234  05DE BC             	CP	H
+       235  05DF C0             	RET	NZ		;RETURN IF NOT TIME TO EJECT
+       236  05E0 7B             	LD	A,E
+       237  05E1 BD             	CP	L
+       238  05E2 C0             	RET	NZ		;RETURN IF NOT TIME TO EJECT
+       239  05E3 3A 00 00    E  	LD	A,(SHIFT1)
+       240  05E6 CB 77          	BIT	6,A		;SEE IF THE PART IS BAD
+       241  05E8 CA EE 05       	JP	Z,NOKICK
+       242  05EB CD F7 05       	CALL	KICKON
+       243  05EE 3A 00 00    E  NOKICK:	LD	A,(RUNREG)
+       244  05F1 CB AF          	RES	5,A		;PART HERE TESTED FLAG
+       245  05F3 32 00 00    E  	LD	(RUNREG),A
+       246  05F6 C9             	RET
+       247  05F7
+       248                      			;************************************************
+       249                          			;*	THIS ROUTINE WILL TURN ON THE KICKOUT	*
+       250                          			;*  AIR SOLENOID, SET THE KICKOUT REQUEST FLAG	*
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   6
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       251                          			;*  FOR THE TIMERS ROUTINE, AND LOAD THE 10mS	*
+       252                          			;*  COUNT VALUE FOR THE TIMERS ROUTINE.		*
+       253                          			;************************************************
+       254  05F7 3A 00 00    E  KICKON:	LD	A,(TIMEREG)	;TIME TO EJECT.  SET THE KICKOUT REQUEST
+       255  05FA CB C7          	SET	0,A		;FLAG.
+       256  05FC 32 00 00    E  	LD	(TIMEREG),A
+       257  05FF 3A 00 00    E  	LD	A,(OUTCNT)	;LOAD THE 10mS TIME CONSTANT VALUE.
+       258  0602 32 00 00    E  	LD	(OUTDWN),A
+       259  0605 3A 00 00    E  	LD	A,(PORT06)
+       260  0608 CB DF          	SET	3,A		;TURN ON THE EJECT SOLENOID.
+       261  060A D3 06          	OUT	06H,A
+       262  060C 32 00 00    E  	LD	(PORT06),A
+       263  060F C9             	RET
+       264  0610
+       265                      			;************************************************
+       266                      			;*	THIS ROUTINE WILL CHECK IF THE CURRENT	*
+       267                      			;*  IS AT 360 DEGREES, AND IF SO RESET THE COUNT*
+       268                      			;*  TO ZERO.					*
+       269                      			;************************************************
+       270  0610 2A 00 00    E  ZEROIT:	LD	HL,(CURCNT)
+       271  0613 7C             	LD	A,H
+       272  0614 FE 01          	CP	01H		;CHECK IF THE COUNT IS AT 360 DEGREES.
+       273  0616 C0             	RET	NZ
+       274  0617 7D             	LD	A,L		
+       275  0618 FE 68          	CP	68H
+       276  061A C0             	RET	NZ
+       277  061B 26 00          	LD	H,00H		;IF IT IS RESET THE COUNT TO ZER0.
+       278  061D 2E 00          	LD	L,00H
+       279  061F 22 00 00    E  	LD	(CURCNT),HL
+       280  0622 C9             	RET
+       281  0623
+       282                      			;************************************************
+       283                      			;*	THIS ROUTINE WILL STOP THE MACHINE	*
+       284                      			;*  IF THERE HAS BEEN A REQUEST TO DO SO AND IF	*
+       285                      			;*  THE MACHINE IS IN THE CORRECT LOCATION.	*
+       286                      			;*	DEPENDING ON WHICH MODE THE MACHINE IS	*
+       287                      			;*  IN (JOG, RUN, CALIBRATE) DIFFERENT FLAGS 	*
+       288                      			;*  WILL BE CLEARED OR SET.			*
+       289                      			;*	THE LOCATION FOR THE STOP ROUTINE IS	*
+       290                      			;*  DETERMINED BY WHAT WORKS OUT BEST FOR THE	*
+       291                      			;*  OPERATOR.  THE VALUE IS ENTERED WITH THE 	*
+       292                      			;*  THE TT5 TERMINAL.				*
+       293                      			;************************************************
+       294  0623                	
+       295  0623 3A 00 00    E  STOPIT:	LD	A,(STPREG)	;CHECK IF THE STOP SET BIT IS SET
+       296  0626 CB 7F          	BIT	7,A
+       297  0628 C8             	RET	Z		;IF STPSET BIT IS CLEAR RETURN TO PULSE.
+       298  0629 2A 00 00    E  	LD	HL,(CURCNT)
+       299  062C ED 5B 00 00 E  	LD	DE,(STOPCNT)
+       300  0630 7A             	LD	A,D
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   7
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       301  0631 BC             	CP	H
+       302  0632 C0             	RET	NZ		;IF NOT AT THE STOP LOCATION RETURN TO PULSE
+       303  0633 7B             	LD	A,E
+       304  0634 BD             	CP	L
+       305  0635 C0             	RET	NZ		;IF NOT AT THE STOP LOCATION RETURN TO PULSE
+       306  0636 3A 00 00    E  	LD	A,(CALREG)
+       307  0639 CB 67          	BIT	4,A		;IS THE CALIBRATION STOP REQUEST FLAG SET
+       308  063B C2 82 06       	JP	NZ,STPCAL	;IF SO, JUMP TO CALIBRATION MODE STOP
+       309  063E 3A 00 00    E  	LD	A,(REG1)
+       310  0641 CB 57          	BIT	2,A		;ARE WE IN THE JOG MODE
+       311  0643 C2 53 06       	JP	NZ,STPJOG	;IF SO, JUMP TO JOG MODE STOP SEQUENCE
+       312  0646 3A 00 00    E  	LD	A,(PORT06)
+       313  0649 CB AF          	RES	5,A		;RESET THE OVEN FLAG
+       314                      				;RES	4,A	RESET THE SYNTRON BOWL
+       315  064B D3 06          	OUT	06H,A
+       316  064D 32 00 00    E  	LD	(PORT06),A
+       317  0650 C3 5B 06       	JP	STPRUN
+       318  0653
+       319  0653 3A 00 00    E  STPJOG:	LD	A,(REG1)
+       320  0656 CB 97          	RES	2,A		;RESET THE JOGGING MODE FLAG
+       321  0658 32 00 00    E  	LD	(REG1),A
+       322  065B 3A 00 00    E  STPRUN:	LD	A,(REG1)
+       323  065E CB 8F          	RES	1,A		;RESET THE RUNNING FLAG
+       324  0660 32 00 00    E  	LD	(REG1),A
+       325  0663 3A 00 00    E  	LD	A,(PORT06)
+       326  0666 CB B7          	RES	6,A		;RESET THE MOTOR FLAG
+       327                      				;RES	2,A	RESET THE RACK VIBRATOR
+       328  0668 D3 06          	OUT	06H,A
+       329  066A 32 00 00    E  	LD	(PORT06),A
+       330  066D 3A 00 00    E  	LD	A,(STPREG)
+       331  0670 AF             	XOR	A		;RESET THE STOP REQUEST FLAG&& RES 7,A &&&&&&
+       332  0671 32 00 00    E  	LD	(STPREG),A
+       333  0674 3A 00 00    E  	LD	A,(TIMEREG)
+       334  0677 CB 77          	BIT	6,A		;ARE WE RESETTING SET UP MODE WHILE RUNNING
+       335  0679 C8             	RET	Z		;IF NOT RETURN
+       336  067A CB BF          	RES	7,A		;RESET THE SETUP MODE FLAG
+       337  067C CB B7          	RES	6,A		;RESET THE CLEARING FLAG
+       338  067E 32 00 00    E  	LD	(TIMEREG),A
+       339  0681 C9             	RET
+       340                      				;*********************************************
+       341                      				;THIS IS THE STOP ROUTINE FOR THE CALIBRATE
+       342                      				;                   PROCESS
+       343                      				;*********************************************
+       344  0682
+       345  0682 3A 00 00    E  STPCAL:	LD	A,(PORT06)
+       346  0685 CB B7          	RES	6,A		;TURN OFF THE MOTOR
+       347  0687 D3 06          	OUT	06H,A
+       348  0689 32 00 00    E  	LD	(PORT06),A
+       349  068C 3A 00 00    E  	LD	A,(REG2)	;IN	A,01H
+       350  068F CB 67          	BIT	4,A		;IF THE LOAD DISABLE FLAG IS ACTIVE  BIT 2,A
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   8
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       351  0691 C2 9E 06       	JP	NZ,CALSTP	;DO NOT RESET THE LOAD DISABLER
+       352  0694 3A 00 00    E  	LD	A,(PORT06)
+       353  0697 CB 8F          	RES	1,A		;RESET THE LOAD DISABLER
+       354  0699 D3 06          	OUT	06H,A
+       355  069B 32 00 00    E  	LD	(PORT06),A
+       356  069E 3A 00 00    E  CALSTP:	LD	A,(CALREG)
+       357  06A1 CB FF          	SET	7,A		;SET THE CALIBRATION MEMORY FLAG
+       358  06A3 32 00 00    E  	LD	(CALREG),A
+       359  06A6 3A 00 00    E  	LD	A,(STPREG)
+       360  06A9 CB BF          	RES	7,A		;RESET THE STOP REQUEST FLAG
+       361  06AB 32 00 00    E  	LD	(STPREG),A
+       362  06AE 3A 00 00    E  	LD	A,(CALREG)
+       363  06B1 CB A7          	RES	4,A		;RESET THE CALIBRATION STOP REQUEST
+       364  06B3 CB 87          	RES	0,A		;RESET THE CALIBRATION PROCESS FLAG
+       365  06B5 32 00 00    E  	LD	(CALREG),A
+       366  06B8 3A 00 00    E  	LD	A,(REG1)
+       367  06BB CB 47          	BIT	0,A		;CHECK THE MCR DISABLED FLAG
+       368  06BD C8             	RET	Z
+       369  06BE 3A 00 00    E  	LD	A,(REG1)
+       370  06C1 CB 87          	RES	0,A		;RESET THE MCR DISABLE OCCURED FLAG.
+       371  06C3 32 00 00    E  	LD	(REG1),A
+       372  06C6 C9             	RET
+       373  06C7
+       374                      			;************************************************
+       375                      			;*	THIS ROUTINE IS USED WHEN THE MACHINE 	*
+       376                      			;*  IS IN THE JOG MODE TO SET THE STOP REQUEST.	*
+       377                      			;*  	SINCE THE MACHINE IS IN THE STOP 	*
+       378                      			;*  LOCATION WHEN THE JOG MODE IS REQUESTED, 	*
+       379                      			;*  THIS SEPERATE LOCATION ASSURES THE MACHINE	*
+       380                      			;*  WILL NOT ALREADY SEE THAT IT IS IN THE STOP	*
+       381                      			;*  LOCATION AND NOT BEGIN THE JOG CYCLE.  WHEN	*
+       382                      			;*  THE JOG MODE IS REQUESTED A FLAG IS SET TO	*
+       383                      			;*  INDICATE THIS.  THIS ROUTINE WILL FIRST	*
+       384                      			;*  CHECK THE JOG FLAG AND IF SET WILL THEN	*
+       385                      			;*  COMPARE COUNTS.  WHEN THE COUNT COMPARES 	*
+       386                      			;*  POSITIVE IT WILL SET THE STOP REQUEST FLAG	*
+       387                      			;************************************************
+       388  06C7
+       389  06C7                	
+       390  06C7
+       391  06C7 3A 00 00    E  JOGIT:	LD	A,(REG1)
+       392  06CA CB 57          	BIT	2,A		;IS THE JOG MODE FLAG SET
+       393  06CC C8             	RET	Z		;IF NOT RETURN TO PULSE
+       394  06CD 2A 00 00    E  	LD	HL,(CURCNT)	;LOAD THE CURRENT COUNT FOR COMPARISON
+       395  06D0 ED 5B 00 00 E  	LD	DE,(JOGCNT)	;LOAD THE LOCATION COUNT FOR THE JOG OPERATION
+       396  06D4 7A             	LD	A,D
+       397  06D5 BC             	CP	H
+       398  06D6 C0             	RET	NZ		;RETURN IF IT IS NOT TIME TO SET FOG STOP BIT
+       399  06D7 7B             	LD	A,E
+       400  06D8 BD             	CP	L
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE   9
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       401  06D9 C0             	RET	NZ		;RETURN IF IT IS NOT TIME TO SET JOG STOP BIT
+       402  06DA 3A 00 00    E  	LD	A,(STPREG)
+       403  06DD CB FF          	SET	7,A		;SET THE STOP REQUEST FLAG
+       404  06DF 32 00 00    E  	LD	(STPREG),A
+       405  06E2 C9             	RET
+       406  06E3
+       407                      			;************************************************
+       408                      			;*	THIS ROUTINE IS USED TO VERIFY THAT A 	*
+       409                      			;*  PART HAS BEEN TESTED.  IF THERE IS NO PART	*
+       410                      			;*  PRESENT IT WILL CLEAR THE SHIFT REGISTER    *
+       411                      			;*  BIT AND CANCEL THE BAD PART EJECT.  IF THE	*
+       412                      			;*  PART IS PRESENT IT WILL NOT AFFECT THE SHIFT*
+       413                      			;*  REGISTER BIT.  IF THE PART IS NOT PRESENT	*
+       414                      			;*  BUT THE SHIFT REGISTER INDICATES THE PART	*
+       415                      			;*  WAS GOOD, AN ERROR FLAG AND INDICATOR LIGHT	*
+       416                      			;*  ARE SET.					*
+       417                      			;*  	THE ROUTINE WILL SET A CONDITION FLAG	*
+       418                      			;*  THAT SHOWS THIS TEST WAS COMPLETE.  THIS 	*
+       419                      			;*  FLAG IS USED TO ENTER THE PART EJECT ROUTINE*
+       420                      			;************************************************
+       421  06E3 3A 00 00    E  PARTIT:	LD	A,(RUNREG)
+       422  06E6 CB 67          	BIT	4,A		;SEE IF THE BITS HAVE BEEN SHIFTED.
+       423  06E8 C8             	RET	Z		;IF NOT, RETURN TO PULSE ROUTINE
+       424  06E9 2A 00 00    E  	LD	HL,(CURCNT)
+       425  06EC ED 5B 00 00 E  	LD	DE,(PARTCNT)	;LOAD THE LOCATION COUNT FOR THE PART VIEW
+       426  06F0 7A             	LD	A,D
+       427  06F1 BC             	CP	H		;CHECK THE LEAST SIG. BYTE
+       428  06F2 C0             	RET	NZ		;RETURN IF THEY ARE NOT EQUAL
+       429  06F3 7B             	LD	A,E
+       430  06F4 BD             	CP	L		;CHECK THE MOST SIG. BYTE
+       431  06F5 C0             	RET	NZ		;RETURN IF THEY ARE NOT EQUAL
+       432  06F6 3A 00 00    E  	LD	A,(RUNREG)
+       433  06F9 CB 77          	BIT	6,A		;SEE IF THE PART IS PRESENT
+       434  06FB C2 2F 07       	JP	NZ,PRTHERE	;IF SO, JUMP TO SET COMPLETE BITS
+       435  06FE 3A 00 00    E  	LD	A,(SHIFT2)	;CHECK,AT THE CUURENT SHIFTED LOCATION, IF THE
+       436  0701 CB 7F          	BIT	7,A		;PART WAS GOOD OR BAD.  WHICH BIT WILL DEPEND
+       437  0703 CA 27 07       	JP	Z,PARPROB	;IF GOOD AND NOT THERE, JUMP.
+       438  0706 3A 00 00    E  	LD	A,(SHIFT2)	;RESET THE ABOVE BIT. BAD PART WAS JUST AIR.
+       439  0709 CB BF          	RES	7,A		;THIS IS THE BIT
+       440  070B 32 00 00    E  	LD	(SHIFT2),A
+       441  070E C3 2F 07       	JP	PRTHERE		;JUMP TO SET THE COMPLETE BITS
+       442  0711
+       443  0711 3A 00 00    E  	LD	A,(ESIRLY)	;&&&&&&&&&&&&&&&PARPROB&&&&&&&&&&&&&&&&&&
+       444  0714 CB FF          	SET	7,A		;SET A BIT THAT SAYS PART TESTED GOOD BUT
+       445  0716 32 00 00    E  	LD	(ESIRLY),A	;NO PART WAS PRESENT
+       446  0719 DB 01          	IN	A,01H
+       447  071B CB FF          	SET	7,A		;TURN ON ERROR LED
+       448  071D D3 01          	OUT 	01H,A
+       449  071F 3A 00 00    E  	LD	A,(STPREG)	;SET THE STP REQUEST TO STOP THE MACHINE
+       450  0722 CB FF          	SET	7,A
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE  10
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       451  0724 32 00 00    E  	LD	(STPREG),A
+       452  0727 3A 00 00    E  PARPROB:LD	A,(SHIFT2)
+       453  072A CB FF          	SET	7,A		;SET THE PART SHIFT BIT AS BEING A BAD PART
+       454  072C 32 00 00    E  	LD	(SHIFT2),A
+       455  072F 3A 00 00    E  PRTHERE:LD	A,(RUNREG)
+       456  0732 CB EF          	SET	5,A		;SET THE PART HERE TEST COMPLETED FLAG
+       457  0734 32 00 00    E  	LD	(RUNREG),A
+       458  0737 3A 00 00    E  	LD	A,(RUNREG)
+       459  073A CB A7          	RES	4,A		;RESET THE PARTS SHIFTED FLAG.
+       460  073C CB B7          	RES	6,A		;RESET THE PART WAS HERE FLAG.
+       461  073E 32 00 00    E  	LD	(RUNREG),A
+       462  0741 C9             	RET
+       463  0742
+       464                      			;****************************************
+       465                      			;*     THIS ROUTINE LOADS A COUNT VALUE	*
+       466                      			;* EVERY TIME A NEW PULSE IS RECEIVED	*
+       467                      			;* THAT WILL BE DECREMENTED IN THE 10mS	*
+       468                      			;* ROUTINE.  IF THE 10mS ROUTINE 	*
+       469                      			;* DECREMENTS THE COUNT TO ZERO BEFORE	*
+       470                      			;* THE NEXT PULSE RESETS IT THE OVEN 	*
+       471                      			;* WILL AUTOMATICALLY SHUT OFF AND A 	*
+       472                      			;* STOP REQUEST WILL BE SET.		*
+       473                      			;****************************************
+       474  0742
+       475  0742
+       476  0742 3A 00 00    E  OVENP:	LD	A,(PORT06)
+       477  0745 CB 6F          	BIT	5,A		;IS THE OVEN ON
+       478  0747 C8             	RET	Z		
+       479  0748 2A 00 00    E  	LD	HL,(SLOWDWN)	;IF SO, LOAD THE OVEN AUTO OFF DELAY COUNT
+       480  074B 23             	INC	HL
+       481  074C 22 00 00    E  	LD	(SLOWDWN),HL
+       482  074F C9             	RET
+       483  0750
+       484  0750                	END
+
+   ASSEMBLER ERRORS =    0
+            Microtec ASMZ80 V4.4f     Jul-26-89  10:53    PAGE  11
+
+
+
+                              CROSS REFERENCE
+
+ LABEL      Value          Reference
+
+ APULSE     0514               52   -56
+ BACKUP     0570               58  -124
+ BOWLCNT  E 0014                9
+ BOWLDWN  E 0016               10
+ BTTEST     0555               93   -96
+ CALREG   E 0002                8    50   306   356   358   362   365
+ CALSTP     069E              351  -356
+ CNTINC     053D               61   -86
+ CURCNT   E 000C                8    62    86    88   127   129   135   137
+                              139   155   157   178   231   270   279   298
+                              394   424
+ ERRREG   E 000A               11
+ ESICNT   E 0009                8   205
+ ESIDWN   E 000B               10   206
+ ESIRLY   E 0011                8   443   445
+ INCRET     0535               66   -68
+ JOGCNT   E 0008                9   395
+ JOGIT      06C7              100  -391
+ KICKCNT  E 000D               10   232
+ KICKIT     05D6               94    99  -231
+ KICKON     05F7              242  -254
+ MEMCNT   E 0007                8    63   136
+ MEMORY   M 0000                0
+ NARG       0000                0
+ NOBACK     0582              126  -132
+ NOKICK     05EE              241  -243
+ NOPUL      056A               55    95  -103   130   140   158
+ OUTCNT   E 0012                9   257
+ OUTDWN   E 0013               10   258
+ OVENDWN  E 0018               11
+ OVENP      0742              102  -476
+ OVENTME  E 0017               11
+ PARPROB    0727              437  -452
+ PARTCNT  E 0015                9   425
+ PARTIT     06E3               98  -421
+ PORT04   E 0005               10   197   201
+ PORT06   E 0006               10   259   262   312   316   325   329   345
+                              348   352   355   476
+ PRTHERE    072F              434   441  -455
+ PULSE      0500               15   -46
+ REG1     E 0000                8    53    59    68    70    91   124   132
+                              134   309   319   321   322   324   366   369
+                              371   391
+ REG2     E 0001                8   349
+ RETINC     059A               65    67  -155
+ RUNREG   E 000E                8   175   202   204   243   245   421   432
+                              455   457   458   461
+
+ SHIFT1   E 0003                9   239
+ SHIFT2   E 0004                9   435   438   440   452   454
+ SLOWCNT  E 001A               11
+ SLOWDWN  E 001C               11   479   481
+ STACK    S 0000                0
+ STOPCNT  E 001B                9   299
+ STOPIT     0623               96  -295
+ STPCAL     0682              308  -345
+ STPJOG     0653              311  -319
+ STPREG   E 000F                9   295   330   332   359   361   402   404
+                              449   451
+ STPRUN     065B              317  -322
+ TESTBT     0547               89   -91
+ TESTCNT  E 0019               10   179
+ TESTIT     05A4               97  -175
+ TESTON     05BB              186  -197
+ TIMEREG  E 0010                8   254   256   333   338
+ ZEROIT     0610              101  -270
+
+

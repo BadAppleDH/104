@@ -1,0 +1,596 @@
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   1
+
+
+
+ ERR  LINE  ADDR OBJ
+
+         1                      				;	LIST	X,B
+         2                      				;	CSEG
+         3                      	ORG	2400H
+         4                      	NAME 	DISPLAY
+         5                      	TITLE	'TT5 Display Module'
+         6  2400
+         7                      	GLOBAL		DISPOLL,DISINIT
+         8                      	GLOBAL		DISPLAY,DISPLAYC,DISPLAYN
+         9                      ;	GLOBAL		RCNTA,WELDADV,FLAGS1,WELDRST,WELDDSP
+        10  2400                	
+        11                      ;	EXTRN		MODREG,FG1
+        12  2400
+        13  2400
+        14  A300                X2M		EQU	0A300H		;Beginning of Display module memory
+        15  2400
+        16  A301                RCNT3		EQU	X2M+1		;Most significant packed BCD digit
+        17  A302                RCNT2		EQU	X2M+2
+        18  A303                RCNT1		EQU	X2M+3
+        19  A304                RCNT		EQU	X2M+4		;Least significant packed BCD digit
+        20  2400
+        21  A305                AN		EQU	RCNT+1		;Beginning of ASCII data storage
+        22  2400
+        23  A306                RCNT8A		EQU	AN+1		;Most significant ASCII data
+        24  A307                RCNT7A		EQU	AN+2
+        25  A308                RCNT6A		EQU	AN+3
+        26  A309                RCNT5A		EQU	AN+4
+        27  A30A                RCNT4A		EQU	AN+5
+        28  A30B                RCNT3A		EQU	AN+6
+        29  A30C                RCNT2A		EQU	AN+7
+        30  A30D                RCNTA		EQU	AN+8		;Least significant ASCII data
+        31  A30E                RCNT0		EQU	AN+9		;RAM Nop
+        32  2400
+        33  A30F                X3M		EQU	RCNT0+1		;Beginning of module 3 memory
+        34  A310                LINE		EQU	X3M+1		;Line #
+        35  A311                COL		EQU	X3M+2		;Column #
+        36  A312                XCTR		EQU	X3M+3		;Character counter
+        37  A313                FLAG2		EQU	X3M+4		;Flag Register
+        38                      					;Bit 0  Transmit Routine Running
+        39                      					;Bit 1  Transmit Start Request
+        40  2400
+        41  A314                FLAGS1		EQU	FLAG2+1		;Share with TT5 module
+        42                      					;Bit 0  Reset the Welder Running count.
+        43  2400
+        44  2400
+        45  A316                D3		EQU	FLAGS1+2	;Beginning of two byte pointers
+        46  A318                JUMP1		EQU	D3+2		;Transmit routine jump memory
+        47  A31A                XPOINT		EQU	D3+4		;Character pointer
+        48  2400
+        49  2400
+        50  A400                BUFSTART	EQU	0A400H		;48 byte RAM buffer for TT5 displays
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   2
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+        51  2400                					
+        52  2400
+        53  2400
+        54                      ;******   Macro Definitions   ******
+        55  2400
+        56                      WRITE		MACRO	#X1,#X2,#X3,#X4
+        57
+        58                      		LD	HL,W#$YM
+        59                      		IFC	#X4,C
+        60                      		CALL	DISPLAYC	;DISPLAY WITH CLEAR
+        61                      		ELSE
+        62                      		CALL	DISPLAY		;REGULAR DISPLAY.
+        63                      		ENDC
+        64                      		JP	W2#$YM
+        65                      W#$YM		IFC	#X3,C
+        66                      		DB	12-((W2#$YM-W3#$YM)/2)+((#X2-1)*24)	;CENTERED NUMBER
+        67                      		ELSE
+        68                      		DB	(#X3-1)+((#X2-1)*24)	;COLUMN NUMBER (1-24)
+        69                      		ENDC
+        70                      W3#$YM		DEFM	'#X1'
+        71                      W2#$YM		NOP
+        72                      		ENDM
+        73  2400
+        74  2400
+        75  2400
+        76                      NUMOUT		MACRO	#NW1,#NW2,#NW3
+        77
+        78                      		LD	HL,NW#$YM
+        79                      		CALL	DISPLAYN	;DISPLAY NUMBER
+        80                      		JP	NW2#$YM
+        81
+        82                      NW#$YM		IFC	#X3,C
+        83                      		DB	12-((NW2#$YM-NW3#$YM)/2)+((#NW2-1)*24)	;CENTERED NUMBER
+        84                      		ELSE
+        85                      		DB	(#NW3-1)+((#NW2-1)*24)	;COLUMN NUMBER (1-24)
+        86                      		ENDC
+        87
+        88                      NW3#$YM		DW	#NW1-7		;BEGIN WITH MOST SIGNIFICANT BYTE.
+        89                      NW2#$YM		NOP
+        90                      		ENDM
+        91  2400
+        92  2400
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   3
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+        94  2400
+        95  2400 CD 14 25       DISPOLL		CALL	XMIT		;Display output routine
+        96  2403 C9             		RET
+        97  2404
+        98  2404 3E 00          DISINIT		LD	A,0
+        99  2406 32 13 A3       		LD	(FLAG2),A
+       100  2409 32 06 A3       		LD	(RCNT8A),A
+       101  240C 32 07 A3       		LD	(RCNT7A),A
+       102  240F 32 08 A3       		LD	(RCNT6A),A
+       103  2412 32 09 A3       		LD	(RCNT5A),A
+       104  2415 32 0A A3       		LD	(RCNT4A),A
+       105  2418 32 0B A3       		LD	(RCNT3A),A
+       106  241B 32 0C A3       		LD	(RCNT2A),A
+       107  241E 32 0D A3       		LD	(RCNTA),A
+       108  2421 32 0E A3       		LD	(RCNT0),A		;Mark the end of count with nop
+       109  2424 C9             		RET
+       110  2425
+       111  2425 3E 00          WELDRST		LD	A,0		;Reset the welder running count
+       112  2427 32 13 A3       		LD	(FLAG2),A
+       113  242A 32 01 A3       		LD	(RCNT3),A
+       114  242D 32 02 A3       		LD	(RCNT2),A
+       115  2430 32 03 A3       		LD	(RCNT1),A
+       116  2433 32 04 A3       		LD	(RCNT),A
+       117  2436 C3 40 24       		JP	WELDDSP		;Display the new reset count
+       118  2439
+       119  2439
+       120  2439 21 04 A3       WELDADV		LD	HL,RCNT		;BCD count
+       121  243C CD A6 24       		CALL	TOTAL
+       122  243F C9             		RET
+       123  2440
+       124  2440
+       125  2440 DD CB 0D 46    WELDDSP		BIT	0,(IX+0DH)	;Is an error message displayed?
+       126  2444 C0             		RET	NZ		;Do not write over an error message with a count
+       127  2445
+       128                      	;	LD	A,(MODREG)
+       129                      	;	BIT	1,A		;Check if in run mode
+       130                      	;	RET	Z		;Do not display count if not in run.
+       131  2445                		
+       132                      	;	LD	A,(FG1)
+       133                      	;	BIT	1,A		;Check if a new mode is being selected
+       134                      	;	RET	NZ		;Do not display count if keyboard is being used.
+       135  2445
+       136  2445 21 04 A3       		LD	HL,RCNT		;Conversion to ASCII, Packed BCD
+       137  2448 11 0D A3       		LD	DE,RCNTA	;ASCII Value
+       138  244B CD 8C 24       		CALL	CONVERT
+       139  244E 21 0D A3       		LD	HL,RCNTA	;Zero suppression
+       140  2451 CD 78 24       		CALL	ZDISP
+       141  2454                		WRITE	'PARTS COUNT',1,1,C
+       141  2454               +
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   4
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+       141  2454 21 5D 24      +		LD	HL,W0000
+       141                     +		IFC	C,C
+       141  2457 CD D1 24      +		CALL	DISPLAYC	;DISPLAY WITH CLEAR
+       141                     +		ELSE
+       141                     +		CALL	DISPLAY		;REGULAR DISPLAY.
+       141                     +		ENDC
+       141  245A C3 69 24      +		JP	W20000
+       141                     +W0000		IFC	1,C
+       141                     +		DB	12-((W20000-W30000)/2)+((1-1)*24)	;CENTERED NUMBER
+       141                     +		ELSE
+       141  245D 00            +		DB	(1-1)+((1-1)*24)	;COLUMN NUMBER (1-24)
+       141                     +		ENDC
+       141  245E 50 41 52 54   +W30000		DEFM	'PARTS COUNT'
+       141  2462 53 20 43 4F   +
+       141  2466 55 4E 54      +
+       141  2469 00            +W20000		NOP
+       142  246A                		NUMOUT	RCNTA,1,13	;Number output
+       142  246A               +
+       142  246A 21 73 24      +		LD	HL,NW0001
+       142  246D CD FD 24      +		CALL	DISPLAYN	;DISPLAY NUMBER
+       142  2470 C3 76 24      +		JP	NW20001
+       142  2473               +
+       142                     +NW0001		IFC	#X3,C
+       142                     +		DB	12-((NW20001-NW30001)/2)+((1-1)*24)	;CENTERED NUMBER
+       142                     +		ELSE
+       142  2473 0C            +		DB	(13-1)+((1-1)*24)	;COLUMN NUMBER (1-24)
+       142                     +		ENDC
+       142  2474               +
+       142  2474 06 A3         +NW30001		DW	RCNTA-7		;BEGIN WITH MOST SIGNIFICANT BYTE.
+       142  2476 00            +NW20001		NOP
+       143  2477 C9             		RET
+       144  2478
+       145  2478
+       146  2478
+       147  2478
+       148                      ;****************************************************************************
+       149                      ;*
+       150                      ;*				ZDISP Routine
+       151                      ;*
+       152                      ;*	This routine must have HL loaded with the RCNTA before starting
+       153                      ;*
+       154                      ;*	The data which this routine looks at will already be in ASCII.
+       155                      ;*
+       156                      ;*	Purpose of this routine is to provide leading zero suppression
+       157                      ;*	on displayed numbers.
+       158                      ;*
+       159                      ;****************************************************************************
+       160  2478
+       161  2478
+       162  2478 01 07 00       ZDISP		LD	BC,7
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   5
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+       163  247B 37             		SCF
+       164  247C 3F             		CCF			;Be sure carry flag is reset.
+       165  247D ED 42          		SBC	HL,BC		;HL will now be pointing at the MSD
+       166  247F 06 07          		LD	B,7		;Change up to seven bytes.
+       167  2481 7E             ZLOOP		LD	A,(HL)
+       168  2482 FE 30          		CP	30H		;Check if the byte is a zero
+       169  2484 C0             		RET	NZ		;Return out of loop for nonon zero numbers.
+       170  2485
+       171  2485 3E 20          		LD	A,20H		;Replace the zero with a blank
+       172  2487 77             		LD	(HL),A
+       173  2488 23             		INC	HL		;Advance to the next least significant digit.
+       174  2489 10 F6          		DJNZ	ZLOOP
+       175  248B C9             		RET			;Return after checking all eight bytes.
+       176  248C
+       177  248C
+       178  248C
+       179  248C
+       180                      ;****************************************************************************
+       181                      ;*
+       182                      ;*				CONVERT Routine
+       183                      ;*
+       184                      ;*	This routine will convert four bytes of packed BCD data into
+       185                      ;*	eight bytes of ASCII data.
+       186                      ;*
+       187                      ;*	HL must be loaded with the least significant BCD byte location
+       188                      ;*
+       189                      ;*	DE must be loaded with the least significant ASCII byte location
+       190                      ;*
+       191                      ;*	NOTE:	Least significant digit should be the highest addresses.
+       192                      ;*
+       193                      ;*
+       194                      ;****************************************************************************
+       195  248C
+       196  248C
+       197  248C
+       198  248C
+       199  248C 01 02 04       CONVERT		LD	BC,0402H	;Constant
+       200  248F 7E             STAT2		LD	A,(HL)		;Get the BCD value.
+       201  2490 F5             STAT3		PUSH	AF		;Temporaily store this value.
+       202  2491 E6 0F          		AND	00001111B	;Mask off the unused positions.
+       203  2493 C6 30          		ADD	A,030H		;Adjust BCD data to Ascii.
+       204  2495 12             		LD	(DE),A		;Output the data to screen.
+       205  2496 F1             		POP	AF		;Restore the value to get the other
+       206  2497 1F             		RRA			;BCD number.
+       207  2498 1F             		RRA
+       208  2499 1F             		RRA
+       209  249A 1F             		RRA			;Rotate A to right four times.
+       210  249B 1B             		DEC	DE		;Move screen location.
+       211  249C 0D             		DEC	C		;Loop twice to get both BCD values.
+       212  249D C2 90 24       		JP	NZ,STAT3	;Jump if not looped twice.
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   6
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+       213  24A0 0E 02          		LD	C,2
+       214  24A2 2B             		DEC	HL		;Get next BCD digit.
+       215  24A3 10 EA          		DJNZ	STAT2		;Jump if four memory locations
+       216  24A5 C9             		RET			;have not been used.
+       217  24A6
+       218  24A6
+       219  24A6                	
+       220  24A6
+       221  24A6
+       222  24A6
+       223                      ;****************************************************************************
+       224                      ;*
+       225                      ;*	 		      TOTAL Routine
+       226                      ;*
+       227                      ;*	This routine advances a Packed BCD count by one when called.
+       228                      ;*
+       229                      ;*	The routine works with four byte packed BCD numbers
+       230                      ;*
+       231                      ;*	Before calling load HL with the least significant byte address
+       232                      ;*
+       233                      ;*	NOTE:	Least significant digit should be the highest addresses.
+       234                      ;*
+       235                      ;****************************************************************************
+       236  24A6
+       237  24A6
+       238  24A6 06 04          TOTAL		LD      B,04H           ;USES 4 CONSECUTIVE MEMORY LOCATION
+       239  24A8 37             		SCF                     ;SET CARRY FLAG TO 1
+       240  24A9 7E             ADDHERE		LD      A,(HL)          ;STARTING WITH LSD LOAD THE VALUE INTO THE ACC
+       241  24AA CE 00          		ADC     A,000H          ;ADDS 0 AND THE CARRY FLAG TO ACCUM
+       242  24AC 27             		DAA                     ;DECIMAL ADJUST THE ACCUM
+       243  24AD 77             		LD      (HL),A          ;STORE THE RESULT BACK INTO MEMORY
+       244  24AE 2B             		DEC     HL              ;POINTS TO NEXT DIGITS
+       245  24AF 10 F8          		DJNZ    ADDHERE         ;DEC B JUMP IF NOT ZERO .. DOES NOT EFFECT THE CARRY F
+       246  24B1 C9             		RET                     ;RETURN TO CALLING ROUTINE
+       247  24B2
+       248  24B2
+       249  24B2
+       250  24B2 3E 01          HTOTAL		LD	A,1
+       251  24B4 86             		ADD	A,(HL)		;Increment the hex counter by one.
+       252  24B5 77             		LD	(HL),A		;Store the new number.
+       253  24B6 D2 BC 24       		JP	NC,C_TEST	;Jump if the most significant byte
+       254  24B9 23             		INC	HL		;does not need to be incremented.
+       255  24BA 34             		INC	(HL)		;Increment the most significant byte.
+       256  24BB 2B             		DEC	HL
+       257  24BC 00             C_TEST		NOP
+       258  24BD C9             		RET
+       259  24BE
+       260  24BE
+       261  24BE
+       262                      Q_STOP		;RESFLAG	65
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   7
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+       263  24BE 4E             		LD	C,(HL)		;Get the actual running count.
+       264  24BF 23             		INC	HL
+       265  24C0 46             		LD	B,(HL)
+       266  24C1 62             		LD	H,D
+       267  24C2 6B             		LD	L,E
+       268  24C3 7E             		LD	A,(HL)		;Get the actual programmed stop count.
+       269  24C4 23             		INC	HL
+       270  24C5 66             		LD	H,(HL)
+       271  24C6 6F             		LD	L,A
+       272  24C7 A7             		AND	A		;Clear the carry bit.
+       273  24C8 ED 42          		SBC	HL,BC		;Subtract the current count from the
+       274  24CA CA D0 24       		JP	Z,STOP1		;Check if the counts are equal.
+       275  24CD F2 D0 24       		JP	P,OK_RUN	;Jump if the current count is less
+       276                      					;than the desired count.
+       277                      STOP1		;SETFLAG	65
+       278  24D0 C9             OK_RUN		RET
+       279  24D1                	
+       280  24D1
+       281  24D1
+       282  24D1
+       283  24D1
+       284  24D1 E5             DISPLAYC	PUSH	HL		;Save message pointer
+       285  24D2 CD 08 25       		CALL	CLRBUFF		;First Clear the display buffer
+       286  24D5 E1             		POP	HL		;Retrieve pointer
+       287  24D6
+       288  24D6 CD ED 24       DISPLAY		CALL	DSUB
+       289  24D9 7E             DLOOP		LD	A,(HL)
+       290  24DA FE 00          		CP	0
+       291  24DC CA E4 24       		JP	Z,LOOPEND	;Loop continues until a NOP is found
+       292  24DF ED A0          		LDI			;(DE) < (HL), HL & DE Inc., BC Dec.
+       293  24E1 C3 D9 24       		JP	DLOOP
+       294  24E4
+       295  24E4 3A 13 A3       LOOPEND		LD	A,(FLAG2)
+       296  24E7 CB CF          		SET	1,A		;Set the Transmit Request flag
+       297  24E9 32 13 A3       		LD	(FLAG2),A
+       298  24EC C9             		RET
+       299  24ED
+       300  24ED
+       301  24ED 16 00          DSUB		LD	D,0
+       302  24EF 5E             		LD	E,(HL)		;Message offset
+       303  24F0 23             		INC	HL		;Now pointing at the beginning of message.
+       304  24F1 E5             		PUSH	HL		;Temporarily save
+       305  24F2 37             		SCF
+       306  24F3 3F             		CCF			;Be sure carry flag is reset
+       307  24F4 21 00 A4       		LD	HL,BUFSTART	;Beginning of RAM buffer
+       308  24F7 ED 5A          		ADC	HL,DE		;Add offset
+       309  24F9 54             		LD	D,H	
+       310  24FA 5D             		LD	E,L		;DE contains destination address
+       311  24FB E1             		POP	HL		;Retrieve source address
+       312  24FC C9             		RET
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   8
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+       313  24FD
+       314  24FD
+       315  24FD CD ED 24       DISPLAYN	CALL	DSUB
+       316  2500 4E             		LD	C,(HL)
+       317  2501 23             		INC	HL
+       318  2502 46             		LD	B,(HL)
+       319  2503 60             		LD	H,B
+       320  2504 69             		LD	L,C
+       321  2505 C3 D9 24       		JP	DLOOP
+       322  2508
+       323  2508
+       324  2508 3E 20          CLRBUFF		LD	A,20H		;Space character
+       325  250A 06 30          		LD	B,48		;Clear all 48 RAM buffer locations
+       326  250C 21 00 A4       		LD	HL,BUFSTART	;Begining address of RAM buffer
+       327  250F 77             CLOOP		LD	(HL),A
+       328  2510 23             		INC	HL
+       329  2511 10 FC          		DJNZ	CLOOP		;Loop until all 48 RAM locations
+       330  2513 C9             		RET			;have been loaded
+       331  2514
+       332  2514
+       333  2514
+       334  2514 3A 13 A3       XMIT		LD	A,(FLAG2)
+       335  2517 CB 47          		BIT	0,A		;Check if transmit sequence in progress.
+       336  2519 C2 41 25       		JP	NZ,XJUMP	;Jump if in progress.
+       337  251C
+       338  251C CB 4F          		BIT	1,A		;Check if a transmit sequence is requested.
+       339  251E C8             		RET	Z		;Return for no request
+       340  251F
+       341  251F CB C7          		SET	0,A		;Set the transmit sequence running flag
+       342  2521 CB 8F          		RES	1,A		;Reset the transmit request bit
+       343  2523 32 13 A3       		LD	(FLAG2),A
+       344  2526
+       345  2526 3E 30          		LD	A,48		;Always output 48 characters
+       346  2528 32 12 A3       		LD	(XCTR),A	;Store
+       347  252B 3E 20          		LD	A,20H		;Line #1
+       348  252D 32 10 A3       		LD	(LINE),A	;Store
+       349  2530 3E 20          		LD	A,20H		;Column #1
+       350  2532 32 11 A3       		LD	(COL),A		;Store
+       351  2535 21 00 A4       		LD	HL,BUFSTART
+       352  2538 22 1A A3       		LD	(XPOINT),HL	;Beginning of message address
+       353  253B
+       354  253B 21 45 25       		LD	HL,ESC1		;First step of escape sequence
+       355  253E 22 18 A3       		LD	(JUMP1),HL
+       356  2541
+       357  2541
+       358  2541
+       359  2541 2A 18 A3       XJUMP		LD	HL,(JUMP1)	;Jump to stored address.
+       360  2544 E9             		JP	(HL)
+       361  2545
+       362  2545
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE   9
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+       363  2545 DB F5          ESC1		IN	A,(0F5H)	;Check if transmit buffer is ready for data
+       364  2547 CB 57          		BIT	2,A		;High if buffer ready
+       365  2549 C8             		RET	Z		;Return if busy
+       366  254A
+       367  254A 3E 1B          		LD	A,1BH		;Escape code command.
+       368  254C D3 F4          		OUT	(0F4H),A
+       369  254E 21 54 25       		LD	HL,ESC2		;Step 2 of escape sequence
+       370  2551 22 18 A3       		LD	(JUMP1),HL
+       371  2554
+       372  2554 DB F5          ESC2		IN	A,(0F5H)	;Check if transmit buffer is ready for data
+       373  2556 CB 57          		BIT	2,A		;High if buffer ready
+       374  2558 C8             		RET	Z		;Return if busy
+       375  2559
+       376  2559 3E 47          		LD	A,'G'		;Second step escape sequence
+       377  255B D3 F4          		OUT	(0F4H),A	;Output
+       378  255D 21 63 25       		LD	HL,ESC3		;Prepair to output line number
+       379  2560 22 18 A3       		LD	(JUMP1),HL
+       380  2563                	
+       381  2563 DB F5          ESC3		IN	A,(0F5H)	;Check if transmit buffer is ready for data
+       382  2565 CB 57          		BIT	2,A		;High if buffer ready
+       383  2567 C8             		RET	Z		;Return if busy
+       384  2568
+       385  2568 3A 10 A3       		LD	A,(LINE)	;Get cursor line number
+       386  256B D3 F4          		OUT	(0F4H),A	;Output line number
+       387  256D 21 73 25       		LD	HL,ESC4		;Prepair to output column number
+       388  2570 22 18 A3       		LD	(JUMP1),HL
+       389  2573
+       390  2573 DB F5          ESC4		IN	A,(0F5H)	;Check if transmit buffer is ready for data
+       391  2575 CB 57          		BIT	2,A		;High if buffer ready
+       392  2577 C8             		RET	Z		;Return if busy
+       393  2578
+       394  2578 3A 11 A3       		LD	A,(COL)		;Get cursor column number
+       395  257B D3 F4          		OUT	(0F4H),A	;Output
+       396  257D 21 83 25       		LD	HL,QBUF		;Normal transmit loop
+       397  2580 22 18 A3       		LD	(JUMP1),HL
+       398  2583                	
+       399  2583
+       400  2583
+       401  2583 DB F5          QBUF		IN	A,(0F5H)	;Check if transmit buffer is ready for data
+       402  2585 CB 57          		BIT	2,A		;High if buffer ready
+       403  2587 C8             		RET	Z		;Return if busy
+       404  2588
+       405  2588 2A 1A A3       		LD	HL,(XPOINT)	;Get character position
+       406  258B 7E             		LD	A,(HL)		;Get character to transmit
+       407  258C D3 F4          		OUT	(0F4H),A	;Transmit the character
+       408  258E
+       409  258E 23             		INC	HL		;Increment character pointer		
+       410  258F 22 1A A3       		LD	(XPOINT),HL
+       411  2592 3A 12 A3       		LD	A,(XCTR)
+       412  2595 3D             		DEC	A		;Decrement the character counter
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE  10
+ TT5 Display Module
+
+
+ ERR  LINE  ADDR OBJ
+
+       413  2596 32 12 A3       		LD	(XCTR),A
+       414  2599 C2 83 25       		JP	NZ,QBUF		;Transmit another if not zero
+       415  259C
+       416  259C 3A 13 A3       		LD	A,(FLAG2)
+       417  259F CB 87          		RES	0,A		;Reset the transmit sequence running flag.
+       418  25A1 32 13 A3       		LD	(FLAG2),A
+       419  25A4 C9             		RET
+       420  25A5
+       421  25A5
+       422  25A5
+       423  25A5
+       423  25A5                     END
+
+   ASSEMBLER ERRORS =    0
+            Microtec ASMZ80 V4.4f     Jul-12-89  12:24    PAGE  11
+ TT5 Display Module
+
+
+ TT5 Display Module           CROSS REFERENCE
+
+ LABEL       Value          Reference
+
+ ADDHERE     24A9            -240   245
+ AN          A305             -21    23    24    25    26    27    28    29
+                               30    31
+ BUFSTART    A400             -50   307   326   351
+ CLOOP       250F            -327   329
+ CLRBUFF     2508             285  -324
+ COL         A311             -35   350   394
+ CONVERT     248C             138  -199
+ C_TEST      24BC             253  -257
+ D3          A316             -45    46    47
+ DISINIT     2404               7   -98
+ DISPLAY     24D6               8  -288
+ DISPLAYC    24D1               8   141  -284
+ DISPLAYN    24FD               8   142  -315
+ DISPOLL     2400               7   -95
+ DLOOP       24D9            -289   293   321
+ DSUB        24ED             288  -301   315
+ ESC1        2545             354  -363
+ ESC2        2554             369  -372
+ ESC3        2563             378  -381
+ ESC4        2573             387  -390
+ FLAG2       A313             -37    41    99   112   295   297   334   343
+                              416   418
+ FLAGS1      A314             -41    45
+ HTOTAL      24B2            -250
+ JUMP1       A318             -46   355   359   370   379   388   397
+ LINE        A310             -34   348   385
+ LOOPEND     24E4             291  -295
+ MEMORY    M 0000               0
+ NARG        0000               0
+ NUMOUT    $                  -76   142
+ NW0001      2473             142   142
+ NW20001     2476             142   142
+ NW30001     2474             142
+ OK_RUN      24D0             275  -278
+ QBUF        2583             396  -401   414
+ Q_STOP      24BE            -262
+ RCNT        A304             -19    21   116   120   136
+ RCNT0       A30E             -31    33   108
+ RCNT1       A303             -18   115
+ RCNT2       A302             -17   114
+ RCNT2A      A30C             -29   106
+ RCNT3       A301             -16   113
+ RCNT3A      A30B             -28   105
+ RCNT4A      A30A             -27   104
+ RCNT5A      A309             -26   103
+ RCNT6A      A308             -25   102
+
+ RCNT7A      A307             -24   101
+ RCNT8A      A306             -23   100
+ RCNTA       A30D             -30   107   137   139   142
+ STACK     S 0000               0
+ STAT2       248F            -200   215
+ STAT3       2490            -201   212
+ STOP1       24D0             274  -277
+ TOTAL       24A6             121  -238
+ W0000       245D             141   141
+ W20000      2469             141   141
+ W30000      245E             141
+ WELDADV     2439            -120
+ WELDDSP     2440             117  -125
+ WELDRST     2425            -111
+ WRITE     $                  -56   141
+ X2M         A300             -14    16    17    18    19
+ X3M         A30F             -33    34    35    36    37
+ XCTR        A312             -36   346   411   413
+ XJUMP       2541             336  -359
+ XMIT        2514              95  -334
+ XPOINT      A31A             -47   352   405   410
+ ZDISP       2478             140  -162
+ ZLOOP       2481            -167   174
+
+

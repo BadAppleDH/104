@@ -1,0 +1,1100 @@
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   1
+
+
+
+ ERR  LINE  ADDR OBJ
+
+         1  0000
+         2  0000
+         3  0000
+         4                      		;********************************************************
+         5                      		;*          THIS MODULE WILL BE CALLED BY AN INTERUPT   *
+         6                      		;*     EVERY 10mS.  IT CHECKS THE STATE OF THE          *
+         7                      		;*     MASTER CONTROL RELAY TO SEE IF TO SEE IF         *
+         8                      		;*     THE MACHINE IS ENABLED.  SEVERAL OF THE          *
+         9                      		;*     CONTROL SWITCHES AND POSITION SENSORS ARE        *
+        10                      		;*     CHECKED TO UPDATE THE MACHINE RUNNING MODE.      *
+        11                      		;*     A ROUTINE IS CALLED TO CHECK TIMERS THAT         *
+        12                      		;*     CONTROL THE ON TIME OF THE TEST, KICKOUT,        *
+        13                      		;*     AND LOW PARTS OUTPUTS.				*
+        14                      		;********************************************************
+        15  0000
+        16                      	NAME	TIMERS
+        17  0000
+        18                      	ORG	0800H
+        19  0800
+        20                      	EXTRN	CHREC,ERRREG,REG1,REG2,CALREG,TIMEREG,OUTCNT,RUNREG
+        21                      	EXTRN	BOWLCNT,ESICNT,STPREG,MCRCNT,PORT06,BOWLDWN,ESIDWN
+        22                      	EXTRN	OUTDWN,PORT04,AIRDWN,MCRDWN,SHIFT2,SLOWDWN,SLOWCNT
+        23                      	EXTRN	OVENDWN,OVENTME,AIRCNT,ESIRLY,DISPOLL,BEEPCNT
+        24  0800
+        25                      	GLOBAL	UPDATE
+        26  0800
+        27                      			;*************************************************
+        28                      			;*   THE FIRST PART OF THIS MODULE STORES THE	*
+        29                      			;* REGISTERS ON THE STACK AND CALLS THE TT5 	*
+        30                      			;* ROUTINE TO SEE IF THERE HAS BEEN ANY REQUESTS*
+        31                      			;*   THE FOLLOWING SECTIONS UNTIL THE NEXT 	*
+        32                      			;* COMMENT BLOCK DEAL WITH A AIR PRESSURE DELAY *
+        33                      			;* ROUTINE.  THIS WILL ALLOW THE AIR PRESSURE	*
+        34                      			;* TO REACH THE AIR PRESSURE SWITCH BEFORE WE	*
+        35                      			;* CALL OUT TO CHECK ON IT.			*
+        36                      			;*   THIS PREVENTS A RACE BETWEEN THE AIR 	*
+        37                      			;* PRESSURE AND THE PROCESSOR.  IF THIS ROUTINE	*
+        38                      			;* WERE LEFT OUT THE MCR WOULD TURN ON THE MAIN	*
+        39                      			;* AIR SOLENOID AND THEN CHECK IF THERE WAS AIR	*
+        40                      			;* PRESSURE.  IF NOT THEN THE MCR (AND MAIN AIR *
+        41                      			;* SOLENOID) WOULD BE DISABLED.			*
+        42                      			;************************************************
+        43  0800
+        44  0800
+        45  0800 F5             UPDATE:	PUSH	AF		;SAVE ALL THE REGISTERS
+        46  0801 C5             	PUSH	BC
+        47  0802 D5             	PUSH	DE
+        48  0803 E5             	PUSH	HL
+        49  0804 CD 00 00    E  	CALL	DISPOLL
+        50  0807 CD 00 00    E  	CALL	CHREC		;CALL THE TT5
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   2
+
+
+
+ ERR  LINE  ADDR OBJ
+
+        51  080A 3A 00 00    E  	LD	A,(REG2)
+        52  080D CB 5F          	BIT	3,A		;IS THE MCR BEING DISABLED
+        53  080F C2 D1 08       	JP	NZ,KILLMCR
+        54  0812 DB 05          	IN	A,05H
+        55  0814 CB 7F          	BIT	7,A		;IS THE MCR ENABLED
+        56  0816 CA 34 08       	JP	Z,MCROUT
+        57  0819 3A 00 00    E  	LD	A,(TIMEREG)
+        58  081C CB 5F          	BIT	3,A		;THE AIR FINISHED FLAG
+        59  081E C2 27 08       	JP	NZ,AIRDONE
+        60  0821 CD 74 08       	CALL	NOAIR		;CALL TO WAIT FOR AIR UP
+        61  0824 C3 EC 09       	JP	UPEND
+        62  0827 DB 00          AIRDONE:IN	A,00H
+        63  0829 CB 67          	BIT	4,A		;IS AIR PRESSURE UP
+        64  082B C2 F9 08       	JP	NZ,MCR
+        65  082E CD B8 08       	CALL	AIROFF
+        66  0831 C3 EC 09       	JP	UPEND
+        67  0834
+        68  0834 3A 00 00    E  MCROUT:	LD	A,(CALREG)
+        69  0837 CB 47          	BIT	0,A
+        70  0839 CA 3F 08       	JP	Z,NOTCAL
+        71  083C CD B8 0B       	CALL	RESCAL		;SHUT DOWN THE CALIBRATE PROCESS IF E STOPPED
+        72  083F 3A 00 00    E  NOTCAL:	LD	A,(CALREG)
+        73  0842 CB 7F          	BIT	7,A
+        74  0844 CA 61 08       	JP	Z,CALNOT
+        75  0847 3A 00 00    E  	LD	A,(CALREG)
+        76  084A CB BF          	RES	7,A
+        77  084C 32 00 00    E  	LD	(CALREG),A
+        78  084F 3A 00 00    E  	LD	A,(ESIRLY)
+        79  0852 FE 00          	CP	00H
+        80  0854 CA 61 08       	JP	Z,CALNOT
+        81  0857 00             	NOP			;FUTURE LOCATION TO DISPLAY ERROR MESSAGE
+        82  0858 00             	NOP			;IF TT5 IS CONNECTED OR NOT
+        83  0859 00             	NOP
+        84  085A 3E 00          	LD	A,00H
+        85  085C 32 00 00    E  	LD	(ESIRLY),A	;RESET THE ERROR REGISTER
+        86  085F D3 01          	OUT	01H,A		;TURN OFF THE ERROR LIGHT
+        87  0861 3A 00 00    E  CALNOT:	LD	A,(TIMEREG)
+        88  0864 CB 5F          	BIT	3,A		;IS THE AIR FINISHED FLAG SET
+        89  0866 CA 22 09       	JP	Z,MCROFF	;IF NOT GO ON TO CHECK THE RUNNING FLAG
+        90  0869 3A 00 00    E  	LD	A,(TIMEREG)
+        91  086C CB 9F          	RES	3,A		;RESET THE AIR FINISHED FLAG
+        92  086E 32 00 00    E  	LD	(TIMEREG),A
+        93  0871 C3 22 09       	JP	MCROFF
+        94  0874                	
+        95  0874
+        96  0874 3A 00 00    E  NOAIR:	LD	A,(TIMEREG)
+        97  0877 CB 57          	BIT	2,A		;ARE WE IN THE AIR ON DELAY LOOP
+        98  0879 C2 8B 08       	JP	NZ,DECAIR
+        99  087C 2A 00 00    E  	LD	HL,(AIRCNT)
+       100  087F 22 00 00    E  	LD	(AIRDWN),HL	;LOAD THE AIR WAIT COUNT
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   3
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       101  0882 3A 00 00    E  	LD	A,(TIMEREG)
+       102  0885 CB D7          	SET	2,A		;SET THE AIR ON DELAY LOOP
+       103  0887 32 00 00    E  	LD	(TIMEREG),A
+       104  088A C9             	RET
+       105  088B
+       106  088B 2A 00 00    E  DECAIR:	LD	HL,(AIRDWN)
+       107  088E 2B             	DEC	HL
+       108  088F 22 00 00    E  	LD	(AIRDWN),HL
+       109  0892 7C             	LD	A,H
+       110  0893 FE 00          	CP	00H
+       111  0895 C0             	RET	NZ
+       112  0896 7D             	LD	A,L
+       113  0897 FE 00          	CP	00H
+       114  0899 C0             	RET	NZ
+       115  089A DB 00          	IN	A,00H
+       116  089C CB 67          	BIT	4,A		;IS THE AIR ON NOW AFTER DELAY
+       117  089E C2 AD 08       	JP	NZ,AIRON
+       118  08A1 3A 00 00    E  	LD	A,(TIMEREG)
+       119  08A4 CB 97          	RES	2,A		;RESET THE AIR DELAY FLAG
+       120  08A6 32 00 00    E  	LD	(TIMEREG),A
+       121  08A9 CD B8 08       	CALL	AIROFF
+       122  08AC C9             	RET
+       123  08AD
+       124  08AD 3A 00 00    E  AIRON:	LD	A,(TIMEREG)
+       125  08B0 CB DF          	SET	3,A		;SET THE AIR FINISHED FLAG
+       126  08B2 CB 97          	RES	2,A		;RESET THE AIR DELAY FLAG
+       127  08B4 32 00 00    E  	LD	(TIMEREG),A
+       128  08B7 C9             	RET
+       129  08B8
+       130  08B8 3A 00 00    E  AIROFF:	LD	A,(REG2)
+       131  08BB CB DF          	SET	3,A		;SET THE MCR DISABLING FLAG
+       132  08BD 32 00 00    E  	LD	(REG2),A
+       133  08C0 3A 00 00    E  	LD	A,(PORT06)
+       134  08C3 CB BF          	RES	7,A		;RESET THE MCR OPTO-22 MODULE
+       135  08C5 D3 06          	OUT	06H,A
+       136  08C7 32 00 00    E  	LD	(PORT06),A
+       137  08CA 2A 00 00    E  	LD	HL,(MCRCNT)
+       138  08CD 22 00 00    E  	LD	(MCRDWN),HL
+       139  08D0 C9             	RET
+       140  08D1
+       141  08D1 2A 00 00    E  KILLMCR:LD	HL,(MCRDWN)
+       142  08D4 2B             	DEC	HL		;DECREMENT THE MCR DISABLE TIME COUNT
+       143  08D5 22 00 00    E  	LD	(MCRDWN),HL
+       144  08D8 7C             	LD	A,H
+       145  08D9 FE 00          	CP	00H
+       146  08DB C2 EC 09       	JP	NZ,UPEND
+       147  08DE 7D             	LD	A,L
+       148  08DF FE 00          	CP	00H
+       149  08E1 C2 EC 09       	JP	NZ,UPEND
+       150  08E4 3A 00 00    E  	LD	A,(PORT06)
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   4
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       151  08E7 CB FF          	SET	7,A		;TURN ON THE OPTO-22 MODULE AFTER MCR IS OUT
+       152  08E9 D3 06          	OUT	06H,A
+       153  08EB 32 00 00    E  	LD	(PORT06),A
+       154  08EE 3A 00 00    E  	LD	A,(REG2)
+       155  08F1 CB 9F          	RES	3,A		;RESET THE DISABLING FLAG FOR THE MCR
+       156  08F3 32 00 00    E  	LD	(REG2),A
+       157  08F6 C3 34 08       	JP	MCROUT
+       158  08F9                	
+       159  08F9
+       160  08F9
+       161                      			;************************************************
+       162                      			;*	TO GET TO THIS ROUTINE THE MCR IS      	*
+       163                      			;*  ENABLED AND THE AIR PRESSURE IS PRESENT.    *
+       164                      			;*  THIS IS THE NORMAL PATH FOR THE PROGRAM TO	*
+       165                      			;*  FOLLOW IN THE OPERATION OR RUNMODE.		*
+       166                      			;*      CHECKS ARE MADE OF THE SETUP SWITCH,	*
+       167                      			;*  THE LOAD DISABLE SWITCH, THE SYNTRON BOWL	*
+       168                      			;*  TIMER, THE AUTO OVEN OFF ROUTINE, THE	*
+       169                      			;*  KICKOUT TIMER AND PART TEST TIMER, AND	*
+       170                      			;*  IF A PART HAS PASSED BY THE PART SENSOR.	*
+       171                      			;*  THE END OF ORDER BEEPER IS CHECKED TO SEE	*
+       172                      			;*  IF THE BEEPER IS ACTIVE OR NEEDS TO BE 	*
+       173                      			;*  TURNED OF IF TIMED OUT			*
+       174                      			;*      IF THE MACHINE IS RUNNING THE PART 	*
+       175                      			;*  LEVEL IN THE RIFFLE RACK IS CHECKED AND THE	*
+       176                      			;*  THE LOW PART HISTORY FLAG MODIFIED.		*
+       177                      			;************************************************
+       178  08F9
+       179  08F9 CD F8 0B       MCR:	CALL	SETUP		;CALL TO CHECK ON SETUP MODE.
+       180  08FC CD E7 0A       	CALL	LOADER		;CALL TO CHECK ON LOAD DISABLER
+       181  08FF CD 1B 0A       	CALL	TIME1		;CALL TO CHECK ON PART LEVEL
+       182  0902 CD 6A 0C       	CALL	OVENT		;CHECK ON THE OVEN AUTO OFF AND STOP REQ.
+       183  0905 CD F2 09       	CALL	TIMER		;CHECK THE KICKOUT AND PART TEST TIMERS.
+       184  0908 CD CF 0A       	CALL	PARCHK		;CHECK IF A PART HAS PASSED THE SENSOR
+       185  090B CD 84 0A       	CALL	SPDCHK		;CHECK ON THE SYNTRON BOWL
+       186  090E CD 73 0B       	CALL	CHUTEO		;CHECK ON THE LOAD CHUTE POSITION
+       187  0911 CD 76 0A       	CALL	SYNHIS		;CHECK IF THE PARTS ARE LOW IN THE RIFFLE RACK
+       188  0914 CD C0 0C       	CALL	BEEP		;CHECK IF THE END OF ORDER BEEPER IS ACTIVE
+       189  0917 3A 00 00    E  	LD	A,(REG1)	;CHECK IF TESTMARK IS IN RUNNING MODE.
+       190  091A CB 4F          	BIT	1,A
+       191  091C CA 5E 09       	JP 	Z,MCRCAL	;IF NOT RUNNING CHECK IF CALIBRATING.
+       192  091F C3 25 0B       	JP	RUNMODE
+       193  0922
+       194  0922
+       195  0922
+       196                      			;************************************************
+       197                      			;*	TO GET TO THIS ROUTINE THE MASTER 	*
+       198                      			;*  CONTROL RELAY IS NOT ENABLED.		*
+       199                      			;*	THE ROUTINE WILL CHECK THE STATE OF THE *
+       200                      			;*  RUNNING FLAG.  IF THE MACHING IS NOT RUNNING*
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   5
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       201                      			;*  THE PROGRAM WILL JUMP TO RESTORE THE 	*
+       202                      			;*  REGISTERS AND RETURN TO THE MAIN PROGRAM.	*
+       203                      			;*  IF THE MACHINE IS RUNNING AT THIS TIME THE	*
+       204                      			;*  FLAG WILL BE RESET AND THE OUTPUTS ALL 	*
+       205                      			;*  RESET.  A FLAG WILL BE SET THAT WILL 	*
+       206                      			;*  INDICATE A MCR DISABLE OCCURED BECAUSE OF 	*
+       207                      			;*  LOSS OF AIR PRESSURE DURING A RUN CYCLE.	*
+       208                      			;************************************************
+       209  0922
+       210  0922 3A 00 00    E  MCROFF:	LD 	A,(REG1)	;CHECK IF IN RUNNING MODE
+       211  0925 CB 4F          	BIT	1,A
+       212  0927 CA EC 09       	JP	Z,UPEND
+       213  092A CB 8F          	RES	1,A		;RESET THE RUNNING MODE FLAG.
+       214  092C 32 00 00    E  	LD	(REG1),A	
+       215  092F 3A 00 00    E  	LD	A,(PORT06)
+       216  0932 CB B7          	RES	6,A		;RESET THE MOTOR
+       217  0934 CB AF          	RES	5,A		;RESET THE OVEN
+       218  0936 CB A7          	RES	4,A		;RESET THE SYNTRON BOWL
+       219  0938 CB 9F          	RES	3,A		;RESET THE KICKOUT BIT
+       220  093A CB 97          	RES	2,A		;RESET THE RACK VIBRATOR
+       221  093C D3 06          	OUT	06H,A	
+       222  093E 32 00 00    E  	LD	(PORT06),A
+       223  0941 3A 00 00    E  	LD	A,(REG2)	;IN	A,01H
+       224  0944 CB 67          	BIT	4,A		;IS THE LOAD DISABLE FLAG ACTIVE. BIT 2,A
+       225  0946 C2 53 09       	JP	NZ,OFFMCR
+       226  0949 3A 00 00    E  	LD	A,(PORT06)
+       227  094C CB 8F          	RES	1,A		;RESET THE LOAD DISABLER IF SWITCH NOT ACTIVE
+       228  094E D3 06          	OUT	06H,A
+       229  0950 32 00 00    E  	LD	(PORT06),A
+       230  0953 3A 00 00    E  OFFMCR:	LD 	A,(REG1)	;SET A BIT THAT SAYS A DISABLE OCCURED.
+       231  0956 CB C7          	SET	0,A
+       232  0958 32 00 00    E  	LD	(REG1),A
+       233  095B C3 EC 09       	JP 	UPEND
+       234  095E
+       235                      			;************************************************
+       236                      			;*	TO GET TO THIS ROUTINE,  THE MACHINE	*
+       237                      			;*  AIR PRESSURE MUST BE UP,  THE MASTER CONTROL*
+       238                      			;*  RELAY MUST BE ENABLED, AND THE MACHINE 	*
+       239                      			;*  RUNNING FLAG MUST NOT BE SET.		*
+       240                      			;*	THIS SECTION WILL CHECK THE STATE OF THE*
+       241                      			;*  CALIBRATION STOP FLAG AND IF SET THE PROGRAM*
+       242                      			;*  WILL JUMP TO RESORE THE REGISTERS AND RETI.	*
+       243                      			;*	IF THE CALIBRATION STOP IS NOT SET, THE	*
+       244                      			;*  KICKOUT FLAG WILL BE CHECKED IN CASE THE 	*
+       245                      			;*  MACHINE WAS STOPED IN THE MIDDLE OF AN EJECT*
+       246                      			;*  SEQUENCE.  IF THE KICKOUT FLAG IS SET IT 	*
+       247                      			;*  DECREMENTS THE COUNT AND IF ZERO RESETS ALL	*
+       248                      			;*  OF THE REGISTERS AND KICKOUT SOLENOID.	*
+       249                      			;*  	AT THE END OF THIS ROUTINE THE START	*
+       250                      			;*  JOG, AND CALIBRATE SWITCHES ARE CHECKED TO	*
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   6
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       251                      			;*  SEE IF ANY PROCESS IS REQUESTED.  		*
+       252                      			;*      TO BE ABLE TO CALIBRATE WE MUST NOT 	*
+       253                      			;*  HAVE ALREADY CALIBRATED. ONCE THE MACHINE	*
+       254                      			;*  IS CALIBRATED WE CAN THEN ENTER THE SETUP	*
+       255                      			;*  MODE, REQUEST A START, OR REQUEST A JOG.	*
+       256                      			;************************************************
+       257  095E                	
+       258  095E
+       259  095E 3A 00 00    E  MCRCAL:	LD	A,(CALREG)
+       260  0961 CB 67          	BIT	4,A
+       261  0963 C2 EC 09       	JP	NZ,UPEND	;IF IN CALIBRATION MODE RETI.
+       262  0966 3A 00 00    E  	LD	A,(TIMEREG)
+       263  0969 CB 47          	BIT	0,A		;IS THE EJECT FLAG BIT SET
+       264  096B CA 8F 09       	JP	Z,NOTOUT
+       265  096E 3A 00 00    E  	LD	A,(OUTDWN)
+       266  0971 3D             	DEC	A		;DECREMENT THE 10mS TIMER COUNT.
+       267  0972 32 00 00    E  	LD	(OUTDWN),A
+       268  0975 3A 00 00    E  	LD	A,(OUTDWN)
+       269  0978 FE 00          	CP	00H
+       270  097A CA EC 09       	JP	Z,UPEND		;IF THE COUNT IS ZERO, RESET THE REGISTERS
+       271  097D 3A 00 00    E  	LD	A,(TIMEREG)
+       272  0980 CB 87          	RES	0,A		;RESET THE KICKOUT FLAG
+       273  0982 32 00 00    E  	LD	(TIMEREG),A
+       274  0985 3A 00 00    E  	LD	A,(PORT06)
+       275  0988 CB 9F          	RES	3,A		;RESET THE KICKOUT SOLENOID
+       276  098A D3 06          	OUT	06H,A	
+       277  098C 32 00 00    E  	LD	(PORT06),A
+       278  098F 3A 00 00    E  NOTOUT:	LD	A,(CALREG)
+       279  0992 CB 57          	BIT	2,A		;ARE WE CALIBRATING
+       280  0994 C2 EC 09       	JP	NZ,UPEND
+       281  0997 DB 00          	IN	A,00H
+       282  0999 CB 7F          	BIT	7,A		;CHECK IF PRINTER DOOR OPEN
+       283  099B CA A6 09       	JP	Z,UPCHK		;IF SO DO NOT CHECK FOR START REQUESTS
+       284  099E 3A 00 00    E  	LD	A,(TIMEREG)
+       285  09A1 CB 7F          	BIT	7,A		;ARE WE IN SETUP MODE
+       286  09A3 CA EC 09       	JP	Z,UPEND
+       287  09A6 3A 00 00    E  UPCHK:	LD	A,(CALREG)
+       288  09A9 CB 7F          	BIT	7,A		;HAVE WE CALIBRATED
+       289  09AB C2 B8 09       	JP	NZ,STRJOG	;IF YES THEN DO NOT CALIBRATE AGAIN
+       290                      				;LD	A,(TIMEREG)
+       291                      				;BIT	7,A		SETUP SWITCH ACTIVE
+       292                      				;JP	NZ,UPEND
+       293  09AE DB 00          	IN	A,00H
+       294  09B0 CB 47          	BIT	0,A		;HAS CALIBRATE BEEN REQUESTED
+       295  09B2 C2 C9 09       	JP	NZ,ARECAL
+       296  09B5 C3 EC 09       	JP	UPEND
+       297  09B8
+       298  09B8 DB 00          STRJOG:	IN	A,00H
+       299  09BA CB 4F          	BIT	1,A		;HAS JOG BEEN REQUESTED
+       300  09BC C2 D6 09       	JP	NZ,AREJOG
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   7
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       301  09BF DB 00          	IN	A,00H
+       302  09C1 CB 57          	BIT	2,A		;HAS START BEEN REQUESTED
+       303  09C3 C2 E1 09       	JP	NZ,ARESTR
+       304  09C6 C3 EC 09       	JP	UPEND
+       305  09C9
+       306  09C9
+       307                      			;************************************************
+       308                      			;*	THESE ROUTINES SET A REQUEST FLAG THAT	*
+       309                      			;*  INDICATES A START, JOG, OR CALIBRATE BUTTON *
+       310                      			;*  WAS PRESSED.  THESE FLAGS WILL BE VERIFIED  *
+       311                      			;*  IN THE MAIN PROGRAM WHEN THE MODULE RETURNS	*
+       312                      			;************************************************
+       313  09C9
+       314  09C9
+       315  09C9 3A 00 00    E  ARECAL:	LD	A,(CALREG)
+       316  09CC CB C7          	SET	0,A		;SET CALIBRATE PROCESS FLAG
+       317  09CE CB CF          	SET	1,A		;SET THE CALIBRATE REQUEST FLAG
+       318  09D0 32 00 00    E  	LD	(CALREG),A
+       319  09D3 C3 EC 09       	JP	UPEND
+       320  09D6
+       321  09D6 3A 00 00    E  AREJOG:	LD	A,(RUNREG)
+       322  09D9 CB CF          	SET	1,A		;SET THE JOG REQUEST FLAG
+       323  09DB 32 00 00    E  	LD	(RUNREG),A
+       324  09DE C3 EC 09       	JP	UPEND
+       325  09E1
+       326  09E1 3A 00 00    E  ARESTR:	LD	A,(RUNREG)
+       327  09E4 CB C7          	SET	0,A		;SET THE START REQUEST FLAG
+       328  09E6 32 00 00    E  	LD	(RUNREG),A
+       329  09E9 C3 EC 09       	JP 	UPEND
+       330  09EC
+       331  09EC
+       332                      			;************************************************
+       333                      			;*	THIS ROUTINE WILL BE JUMPED TO WHENEVER	*
+       334                      			;*  THE PROGRAM IS READY TO RETURN TO THE MAIN	*
+       335                      			;*  PROGRAM FROM THE INTERRUPT.  IT WILL RESTORE*
+       336                      			;*  THE REGISTERS BEING USED IN THE MAIN PROGRAM*
+       337                      			;*  AND THEN RETURN.				*
+       338                      			;************************************************
+       339  09EC
+       340  09EC E1             UPEND:	POP	HL	;RESET ALL THE SAVED REGISTERS.
+       341  09ED D1             	POP	DE
+       342  09EE C1             	POP	BC
+       343  09EF F1             	POP	AF
+       344  09F0 ED 4D          	RETI
+       345  09F2
+       346                      			;************************************************
+       347                      			;*  	THIS ROUTINE IS CALLED TO CHECK THE 10mS*
+       348                      			;*  EJECT AND TEST COUNTERS THAT WERE SET BY THE*
+       349                      			;*  PULSE ROUTINE AND THE 10mS COUNTER FOR THE 	*
+       350                      			;*  SYNTRON BOWL THAT WAS SET BY THE SYNCHK AND *
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   8
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       351                      			;*  CHUTEO ROUTINES IN THIS TIMER MODULE.	*
+       352                      			;*  	THE ROUTINES WILL DECREMENT THEIR	*
+       353                      			;*  RESPECTIVE COUNT REGISTERS IF THE REQUEST	*
+       354                      			;*  BITS ARE SET. WHEN THE COUNT REGISTERS REACH*
+       355                      			;*  ZERO THE OUTPUTS ARE RESET AND REQUEST FLAGS*
+       356                      			;*  ARE RESET.  IF THE COUNT IS NOT EQUAL TO 	*
+       357                      			;*  ZERO AFTER DECREMENTING THE FLAG WILL NOT	*
+       358                      			;*  BE RESET AND THE COUNT WILL BE CHECKED AGAIN*
+       359                      			;*  AT THE NEXT 10mS PULSE.			*
+       360                      			;************************************************
+       361  09F2
+       362  09F2 3A 00 00    E  TIMER:	LD 	A,(TIMEREG)	;CHECK IF KICKOUT FLAG IS SET
+       363  09F5 CB 47          	BIT	0,A
+       364  09F7 CA 49 0A       	JP	Z,TIME2
+       365  09FA 3A 00 00    E  	LD	A,(OUTDWN)	;DECREMENT TIME BY 1 (10mSEC)
+       366  09FD 3D             	DEC	A
+       367  09FE 32 00 00    E  	LD	(OUTDWN),A
+       368  0A01 FE 00          	CP	00H		;CHECK IF COUNT HAS REACHED ZERO
+       369  0A03 C2 49 0A       	JP	NZ,TIME2
+       370  0A06 3A 00 00    E  	LD	A,(TIMEREG)	;WHEN TIME IS OUT, RESET FLAG
+       371  0A09 CB 87          	RES	0,A
+       372  0A0B 32 00 00    E  	LD	(TIMEREG),A
+       373  0A0E 3A 00 00    E  	LD	A,(PORT06)	;WHEN TIME IS OUT,RESET THE KICKOUT SOLENOID.
+       374  0A11 CB 9F          	RES	3,A
+       375  0A13 D3 06          	OUT	06H,A
+       376  0A15 32 00 00    E  	LD	(PORT06),A
+       377  0A18 C3 49 0A       	JP 	TIME2
+       378  0A1B
+       379  0A1B 3A 00 00    E  TIME1:	LD	A,(TIMEREG)	;CHECK IF LOW PART FLAG IS SET
+       380  0A1E CB 4F          	BIT	1,A
+       381  0A20 CA 48 0A       	JP	Z,BYEBYE
+       382  0A23 2A 00 00    E  	LD	HL,(BOWLDWN)	;IF SET, DECREMENT BY 1 (10mSEC)
+       383  0A26 2B             	DEC	HL
+       384  0A27 22 00 00    E  	LD	(BOWLDWN),HL
+       385  0A2A 7C             	LD	A,H
+       386  0A2B FE 00          	CP	00H		;CHECK IF COUNT HAS REACHED ZERO (TIMED OUT)
+       387  0A2D C2 48 0A       	JP	NZ,BYEBYE	
+       388  0A30 7D             	LD	A,L
+       389  0A31 FE 00          	CP	00H
+       390  0A33 C2 48 0A       	JP	NZ,BYEBYE
+       391  0A36 3A 00 00    E  	LD	A,(TIMEREG)	;WHEN TIME IS OUT, RESET FLAG
+       392  0A39 CB 8F          	RES	1,A
+       393  0A3B 32 00 00    E  	LD	(TIMEREG),A
+       394  0A3E 3A 00 00    E  	LD	A,(PORT06)	;WHEN TIME IS OUT,TURN OFF SYNTRON BOWL
+       395  0A41 CB A7          	RES	4,A
+       396  0A43 D3 06          	OUT	06H,A
+       397  0A45 32 00 00    E  	LD	(PORT06),A
+       398  0A48 C9             BYEBYE:	RET
+       399  0A49
+       400  0A49 3A 00 00    E  TIME2:	LD 	A,(RUNREG)	;CHECK IF PART TEST FLAG IS SET.
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE   9
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       401  0A4C CB 57          	BIT	2,A
+       402  0A4E C8             	RET	Z
+       403  0A4F 3A 00 00    E  	LD	A,(ESIDWN)	;DECREMENT TIME BY 1 (10mSEC)
+       404  0A52 3D             	DEC	A
+       405  0A53 32 00 00    E  	LD	(ESIDWN),A
+       406  0A56 FE 00          	CP	00H		;CHECK IF COUNT HAS REACHED ZERO (TIMED OUT)
+       407  0A58 C0             	RET	NZ
+       408  0A59 3A 00 00    E  	LD	A,(PORT04)
+       409  0A5C CB FF          	SET	7,A		;WHEN TIME IS OUT, SET THE N.O. CONTACT
+       410  0A5E CB B7          	RES	6,A		;WHEN TIME IS OUT, RESET THE COMM2 CONTACT
+       411  0A60 D3 04          	OUT	04H,A		;ON THE ESI BRIDGE TO ZERO
+       412  0A62 32 00 00    E  	LD	(PORT04),A
+       413  0A65 3A 00 00    E  	LD	A,(RUNREG)	;
+       414  0A68 CB 97          	RES	2,A		;WHEN TIME IS OUT, RESET THE TEST FLAG
+       415  0A6A 32 00 00    E  	LD	(RUNREG),A	;
+       416  0A6D 3A 00 00    E  	LD	A,(RUNREG)	;WHEN TIME IS OUT, SET A FLAG TO INDICATE
+       417  0A70 CB DF          	SET	3,A		;A COMPLETED TEST.
+       418  0A72 32 00 00    E  	LD	(RUNREG),A	;
+       419  0A75 C9             	RET
+       420  0A76
+       421                      			;************************************************
+       422                      			;*	THIS ROUTINE WILL CHECK THE LEVEL OF THE*
+       423                      			;*  RIFFLE RACK.  IF THE PARTS ARE LOW IT WILL	*
+       424                      			;*  SET A FLAG THAT WILL BE DOUBLE CHECKED IN 	*
+       425                      			;*  ANOTHER ROUTINE.				*
+       426                      			;************************************************
+       427  0A76
+       428  0A76 DB 01          SYNHIS:	IN	A,01H		;CHECK IF THE PARTS ARE LOW IN THE RACK.
+       429  0A78 CB 47          	BIT	0,A
+       430  0A7A C0             	RET	NZ
+       431  0A7B 3A 00 00    E  	LD	A,(REG2)	;SET THE PARTS LOW HISTORY BIT IF THE PARTS
+       432  0A7E CB D7          	SET	2,A		;ARE LOW IN THE RIFFLE RACK.
+       433  0A80 32 00 00    E  	LD	(REG2),A
+       434  0A83 C9             	RET
+       435  0A84
+       436                      			;************************************************
+       437                      			;*	THIS ROUTINE DEALS WITH THE SYNTRON BOWL*
+       438                      			;*  CONTROL.  IF THE BOWL IS ALREADY ON THE 	*
+       439                      			;*  ROUTINE WILL GO ON TO THE NEXT ROUTINE.  IF	*
+       440                      			;*  THE SYNTRON BOWL IS NOT ACTIVE THE LOW LEVEL*
+       441                      			;*  HISTORY FLAG IS CHECKED AND IF NOT SET THE 	*
+       442                      			;*  NEXT ROUTINE WILL BE JUMPED TO.  		*
+       443                      			;*  	IF THE HISTORY FLAG IS SET THE LEVEL OF	*
+       444                      			;*  THE RIFFLE RACK WILL BE CHECKED AGAIN.  IF	*
+       445                      			;*  IT IS NO LONGER LOW,  THE HISTORY BIT WILL	*
+       446                      			;*  BE RESET AND THE NEXT ROUTINE WILL BE JUMPED*
+       447                      			;*  TO.  IF THE RACK IS STILL LOW, THE SYNTRON 	*
+       448                      			;*  BOWL PROHIBIT IS CHECKED.  IF IT IS SET THE *
+       449                      			;*  NEXT ROUTINE WILL BE JUMPED TO.  IF IT IS 	*
+       450                      			;*  CLEAR THE BOWL 10mS TIMER REQUEST FLAG WILL	*
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  10
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       451                      			;*  BE SET,  THE BOWL COUNT WILL BE LOADED, THE	*
+       452                      			;*  HISTORY BIT RESET, AND THE BOWL TURNED ON.	*
+       453                      			;*	THE PROGRAM WILL THEN JUMP TO THE NEXT 	*
+       454                      			;*  ROUTINE.					*
+       455                      			;************************************************
+       456  0A84
+       457  0A84 3A 00 00    E  SPDCHK:	LD	A,(TIMEREG)	;IS SYNTRON BOWL CONTROL BIT SET.
+       458  0A87 CB 4F          	BIT	1,A
+       459  0A89 C2 C3 0A       	JP	NZ,CHKSPD
+       460  0A8C 3A 00 00    E  	LD	A,(REG2)	;CHECK IF SYNTRON HISTORY BIT IS SET.
+       461  0A8F CB 57          	BIT 	2,A
+       462  0A91 CA C3 0A       	JP	Z,CHKSPD
+       463  0A94 DB 01          	IN	A,01H
+       464  0A96 CB 47          	BIT	0,A
+       465  0A98 C2 C4 0A       	JP	NZ,RESSYN
+       466  0A9B 3A 00 00    E  	LD	A,(REG2)
+       467  0A9E CB 4F          	BIT	1,A		;CHECK IF THE SYNTRON PROHIBIT BIT IS SET.
+       468  0AA0 C2 C3 0A       	JP	NZ,CHKSPD
+       469  0AA3 3A 00 00    E  	LD	A,(TIMEREG)
+       470  0AA6 CB CF          	SET	1,A		;SET THE LOWPARTS FLAG
+       471  0AA8 32 00 00    E  	LD	(TIMEREG),A
+       472  0AAB 3A 00 00    E  	LD	A,(PORT06)
+       473  0AAE CB E7          	SET	4,A		;TURN ON THE SYNTRON BOWL
+       474  0AB0 D3 06          	OUT	06H,A
+       475  0AB2 32 00 00    E  	LD	(PORT06),A
+       476  0AB5 2A 00 00    E  	LD	HL,(BOWLCNT)
+       477  0AB8 22 00 00    E  	LD	(BOWLDWN),HL	;LD THE BOWL 10mS COUNT FROM THE MEMORY
+       478  0ABB 3A 00 00    E  	LD	A,(REG2)	;RESET THE HISTORY BIT
+       479  0ABE CB 97          	RES	2,A
+       480  0AC0 32 00 00    E  	LD	(REG2),A
+       481  0AC3 C9             CHKSPD:	RET
+       482  0AC4
+       483  0AC4 3A 00 00    E  RESSYN:	LD	A,(REG2)
+       484  0AC7 CB 97          	RES	2,A		;RESET THE HISTORY BIT FOR LOWPARTS TEST.
+       485  0AC9 32 00 00    E  	LD	(REG2),A
+       486  0ACC C3 C3 0A       	JP	CHKSPD
+       487  0ACF
+       488                      			;****************************************
+       489                      			;*   THIS CALLED ROUTINE CONTINUALLY 	*
+       490                      			;* MONITORS THE PART PRESENT SENSOR	*
+       491                      			;* AND WILL SET A FLAG IF IT FOUND. THE	*
+       492                      			;* PARTIT ROUTINE IN THE PULSE MODULE	*
+       493                      			;* LOOKS AT THIS FLAG AND SETS THE SHIFT*
+       494                      			;* REGISTER ACCORDINGLY.  IT ALSO RESETS*
+       495                      			;* THIS FLAG.  THIS OCCURS ONCE PER PART*
+       496                      			;****************************************
+       497  0ACF
+       498  0ACF 3A 00 00    E  PARCHK:	LD	A,(RUNREG)
+       499  0AD2 CB 77          	BIT	6,A		;CHECK IF PART HAS ALREADY BEEN FOUND
+       500  0AD4 C2 E6 0A       	JP	NZ,CHKPAR
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  11
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       501  0AD7 DB 01          	IN	A,01H
+       502  0AD9 CB 4F          	BIT	1,A		;CHECK IF THE PART IS HERE NOW
+       503  0ADB CA E6 0A       	JP	Z,CHKPAR
+       504  0ADE 3A 00 00    E  	LD	A,(RUNREG)
+       505  0AE1 CB F7          	SET	6,A		;SET FLAG TELLING PART WAS PRESENT
+       506  0AE3 32 00 00    E  	LD	(RUNREG),A
+       507  0AE6 C9             CHKPAR:	RET
+       508  0AE7
+       509  0AE7
+       510                      			;************************************************
+       511                      			;*	THIS ROUTINE CHECKS THE LOAD DISABLE	*
+       512                      			;*  SWITCH.  IF IT IS NOT ACTIVE THE ROUTINE 	*
+       513                      			;*  WILL THEN CHECK THE LOWER RIFFLE RACK SENSOR*
+       514                      			;*  TO SEE IF THE PARTS ARE LOW.  IF THE PARTS	*
+       515                      			;*  ARE NOT LOW OR IF THE SENSOR HAS BEEN DIS-	*
+       516                      			;*  ABLED BY THE FRONT PANEL SWITCH THE ROUTINE	*
+       517                      			;*  THEN CHECKS TO SEE THAT THE FLAG IS NOT SET	*
+       518                      			;*  AND IF IT IS IT WILL BE RESET AND THE LOAD	*
+       519                      			;*  DISABLER TURNED OFF.			*
+       520                      			;*	IF EITHER THE LOAD DISABLE SWITCH IS	*
+       521                      			;*  ACTIVATED OR IF THE PARTS GET TO LOW IN THE	*
+       522                      			;*  RIFFLE RACK THE FLAG WILL BE CHECKED TO SEE *
+       523                      			;*  IF IT IS SET.  IF IT IS NOT SET IT WILL BE	*
+       524                      			;*  SET AND THE LOAD DISABLER WILL BE TURNED ON.*
+       525                      			;************************************************
+       526  0AE7
+       527  0AE7 DB 01          LOADER:	IN	A,01H
+       528  0AE9 CB 57          	BIT	2,A		;IS THE LOAD DISABLE SWITCH ACTIVE
+       529  0AEB C2 F3 0A       	JP	NZ,LOADIT
+       530  0AEE CB 5F          	BIT	3,A		;ARE THE PARTS LOW IN THE RACK OR HAS THE
+       531  0AF0 CA 0C 0B       	JP	Z,NOLOAD	;SENSOR BEEN DISABLED.
+       532  0AF3 3A 00 00    E  LOADIT:	LD	A,(REG2)	;SWITCH ACTIVE OR PARTS LOW (NOT DISABLED)
+       533  0AF6 CB 67          	BIT	4,A		;IS THE LOADER FLAG SET
+       534  0AF8 C0             	RET	NZ
+       535  0AF9 3A 00 00    E  	LD	A,(REG2)
+       536  0AFC CB E7          	SET	4,A		;SET THE LOADER FLAG
+       537  0AFE 32 00 00    E  	LD	(REG2),A
+       538  0B01 3A 00 00    E  	LD	A,(PORT06)
+       539  0B04 CB CF          	SET	1,A		;TURN ON THE LOAD DISABLER
+       540  0B06 D3 06          	OUT	06H,A	
+       541  0B08 32 00 00    E  	LD	(PORT06),A
+       542  0B0B C9             	RET
+       543  0B0C 3A 00 00    E  NOLOAD:	LD	A,(REG2)
+       544  0B0F CB 67          	BIT	4,A		;IS THE LOADER FLAG SET
+       545  0B11 C8             	RET	Z
+       546  0B12 3A 00 00    E  	LD	A,(PORT06)
+       547  0B15 CB 8F          	RES	1,A		;TURN OFF THE LOAD DISABLER
+       548  0B17 D3 06          	OUT	06H,A
+       549  0B19 32 00 00    E  	LD	(PORT06),A
+       550  0B1C 3A 00 00    E  	LD	A,(REG2)
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  12
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       551  0B1F CB A7          	RES	4,A		;RESET THE LOADER FLAG
+       552  0B21 32 00 00    E  	LD	(REG2),A
+       553  0B24 C9             	RET
+       554  0B25
+       555  0B25
+       556                      			;************************************************
+       557                      			;*	THIS ROUTINE IS USED TO CHECK THE STOP	*
+       558                      			;*  REQUEST FLAGS AND THE LOAD DISABLE SWITCH.	*
+       559                      			;*  IF VERIFIED STOP REQUEST IS SET THE PROGRAM	*
+       560                      			;*  WILL JUMP TO RESTORE THE MAIN PROGRAM 	*
+       561                      			;*  REGISTERS AND THEN RETURN.			*
+       562                      			;*	IF THE PRINTER DOOR IS OPEN, THE END	*
+       563                      			;*  OF ORDER SWITCH IS ACTIVE, OR THE STOP 	*
+       564                      			;*  REQUEST SWITCH IS ACTIVE A HISTORY FLAG IS	*
+       565                      			;*  SET THAT WILL BE VERIFIED IN THE MAIN 	*
+       566                      			;*  PROGRAM. 					*
+       567                      			;*	THE LOAD DISABLE SWITCH IS CHECKED TO	*
+       568                      			;*  DETERMINE IF THE SYNTRON BOWL AND VIBRATOR	*
+       569                      			;*  SHOULD BE ALLOWED TO BE ACTIVE OR NOT.	*
+       570                      			;*	THE ROUTINE THEN JUMPS TO CHECK IF THE	*
+       571                      			;*  LOAD CHUTE IS OUT OF POSITION OR NOT.	*
+       572                      			;*	IF WE ARE IN THE SETUP MODE THE PRINTER	*
+       573                      			;*  DOOR IS NOT LISTENED TO SO THE HEADS CAN 	*
+       574                      			;*  BE CLEANED WITH THE MACHINE RUNNING.	*
+       575                      			;************************************************
+       576  0B25
+       577  0B25 3A 00 00    E  RUNMODE:LD	A,(REG1)
+       578  0B28 CB 77          	BIT	6,A		;CHECK IF BEEP PROCESS FLAG IS SET
+       579  0B2A C2 3C 0B       	JP	NZ,STPREQ
+       580  0B2D
+       581  0B2D DB 00          	IN	A,00H
+       582  0B2F CB 6F          	BIT	5,A		;IS THE END OF ORDER BEING REQUESTED
+       583  0B31 CA 3C 0B       	JP	Z,STPREQ
+       584  0B34
+       585  0B34 3A 00 00    E  	LD	A,(REG1)
+       586  0B37 CB EF          	SET	5,A		;SET A DEBOUNCE END OF ORDER REQUEST FLAG
+       587  0B39 32 00 00    E  	LD	(REG1),A
+       588  0B3C
+       589  0B3C 3A 00 00    E  STPREQ:	LD	A,(STPREG)
+       590  0B3F CB 7F          	BIT	7,A		;CHECK IF THE STOP REQUEST IS ALREADY SET
+       591  0B41 C2 EC 09       	JP	NZ,UPEND
+       592  0B44 DB 00          	IN	A,00H
+       593  0B46 CB 5F          	BIT	3,A		;CHECK IF THERE IS A STOP REQUEST
+       594  0B48 C2 5D 0B       	JP	NZ,ISASTP
+       595  0B4B
+       596  0B4B 3A 00 00    E  	LD	A,(TIMEREG)
+       597  0B4E CB 7F          	BIT	7,A		;CHECK TO SEE IF WE ARE IN THE SETUP MODE.
+       598  0B50 C2 5A 0B       	JP	NZ,NOMORE
+       599  0B53 DB 00          	IN	A,00H
+       600  0B55 CB 7F          	BIT	7,A		;CHECK IF THE PRINTER DOOR IS OPEN
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  13
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       601  0B57 C2 68 0B       	JP	NZ,DOROPN
+       602  0B5A C3 EC 09       NOMORE:	JP	UPEND
+       603  0B5D
+       604  0B5D
+       605                      			;************************************************
+       606                      			;*	THESE ROUTINES SET HISTORY FLAGS TO	*
+       607                      			;*  INDICATE THAT A STOP REQUEST NEEDS TO BE	*
+       608                      			;*  SET.  THE ROUTINES ARE FOR A STOP REQUEST,	*
+       609                      			;*  OR A PRINTER DOOR OPEN STOP.		*
+       610                      			;************************************************
+       611  0B5D
+       612  0B5D 3A 00 00    E  ISASTP:	LD	A,(STPREG)
+       613  0B60 CB C7          	SET	0,A		;SET THE STOP REQUEST HISTORY BIT
+       614  0B62 32 00 00    E  	LD	(STPREG),A
+       615  0B65 C3 5A 0B       	JP	NOMORE
+       616  0B68
+       617  0B68                	
+       618  0B68 3A 00 00    E  DOROPN:	LD	A,(STPREG)
+       619  0B6B CB D7          	SET	2,A		;SET THE PRINTER DOOR OPEN HISTORY BIT
+       620  0B6D 32 00 00    E  	LD	(STPREG),A
+       621  0B70 C3 5A 0B       	JP	NOMORE
+       622  0B73
+       623  0B73
+       624                      			;************************************************
+       625                      			;*	THIS ROUTINE IS CALLED TO CHECK THE   	*
+       626                      			;*  LOAD CHUTE POSITION.  IF THE CHUTE IS OUT   *
+       627                      			;*  OF POSITION THE SYNTRON BOWL WILL BE SHUT 	*
+       628                      			;*  OFF.  WHEN THE CHUTE IS REPLAED BACK INTO	*
+       629                      			;*  POSITION THE SYNTRON BOWL WILL BE ALLOWED 	*
+       630                      			;*  TO RUN AGAIN.				*
+       631                      			;************************************************
+       632  0B73
+       633  0B73 DB 00          CHUTEO:	IN	A,00H
+       634  0B75 CB 77          	BIT	6,A		;CHECK IF THE CHUTE IS OUT OF POSITION
+       635  0B77 C2 9B 0B       	JP	NZ,CHUOUT
+       636  0B7A 3A 00 00    E  	LD	A,(REG2)
+       637  0B7D CB 6F          	BIT	5,A
+       638  0B7F C2 B7 0B       	JP	NZ,OCHUTE
+       639  0B82 3A 00 00    E  	LD	A,(PORT06)
+       640  0B85 CB A7          	RES	4,A		;SYNTRON BOWL BIT
+       641  0B87 CB 97          	RES	2,A		;VIBRATOR
+       642  0B89 D3 06          	OUT	06H,A
+       643  0B8B 32 00 00    E  	LD	(PORT06),A		
+       644  0B8E 3A 00 00    E  	LD	A,(REG2)
+       645  0B91 CB CF          	SET	1,A		;SET THE SYNTRON PROHIBIT BIT
+       646  0B93 CB EF          	SET	5,A		;SET THE CHUTE OUT FLAG
+       647  0B95 32 00 00    E  	LD	(REG2),A
+       648  0B98 C3 B7 0B       	JP	OCHUTE
+       649  0B9B 3A 00 00    E  CHUOUT:	LD	A,(REG2)
+       650  0B9E CB 6F          	BIT	5,A
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  14
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       651  0BA0 CA B7 0B       	JP	Z,OCHUTE
+       652  0BA3 3A 00 00    E  	LD	A,(REG2)
+       653  0BA6 CB 8F          	RES	1,A
+       654  0BA8 CB AF          	RES	5,A
+       655  0BAA 32 00 00    E  	LD	(REG2),A
+       656  0BAD 3A 00 00    E  	LD	A,(PORT06)
+       657  0BB0 CB D7          	SET	2,A		;VIBRATOR ON
+       658  0BB2 D3 06          	OUT	06H,A
+       659  0BB4 32 00 00    E  	LD	(PORT06),A
+       660  0BB7 C9             OCHUTE:	RET
+       661  0BB8
+       662  0BB8
+       663  0BB8
+       664  0BB8
+       665                      			;************************************************
+       666                      			;*	THIS ROUTINE IS CALLED BY THE MCRCHK	*
+       667                      			;*  ROUTINE TO RESET VARIOUS REGISTERS IF THE	*
+       668                      			;*  MACHINE IS IN THE CALIBRATION PROCESS.	*
+       669                      			;************************************************
+       670  0BB8 3A 00 00    E  RESCAL:	LD	A,(CALREG)
+       671  0BBB CB 47          	BIT	0,A		;CHECK IF IN CALIBRATION PROCESS
+       672  0BBD C8             	RET	Z
+       673  0BBE 3A 00 00    E  	LD	A,(CALREG)
+       674  0BC1 CB 87          	RES	0,A		;IF SO, RESET CALIBRATION PROCESS MODE FLAG
+       675  0BC3 CB 8F          	RES	1,A		;RESET THE CALIBRATION REQUEST FLAG
+       676  0BC5 CB 97          	RES	2,A		;RESET THE   ARE CALIBRATING   FLAG
+       677  0BC7 CB A7          	RES	4,A		;RESET THE CALIBRATION STOP REQUEST FLAG
+       678  0BC9 32 00 00    E  	LD	(CALREG),A
+       679  0BCC 3A 00 00    E  	LD	A,(STPREG)
+       680  0BCF AF             	XOR	A		;CLEAR THE STOP REQUEST, FLAG REGISTER
+       681  0BD0 32 00 00    E  	LD	(STPREG),A
+       682  0BD3 3A 00 00    E  	LD	A,(RUNREG)
+       683  0BD6 CB 87          	RES	0,A		;RESET THE START REQUEST FLAG
+       684  0BD8 CB 8F          	RES	1,A		;RESET THE JOG REQUEST FLAG
+       685  0BDA 32 00 00    E  	LD	(RUNREG),A
+       686  0BDD 3A 00 00    E  	LD	A,(PORT06)
+       687  0BE0 CB B7          	RES	6,A		;TURN OFF THE MOTOR
+       688  0BE2 D3 06          	OUT	06H,A
+       689  0BE4 32 00 00    E  	LD	(PORT06),A
+       690  0BE7 3A 00 00    E  	LD	A,(REG2)	;IN	A,01H
+       691  0BEA CB 67          	BIT	4,A		;IS THE LOAD DISABLE FLAG ACTIVE  BIT 2,A
+       692  0BEC C0             	RET	NZ		;IF SO RETURN
+       693  0BED 3A 00 00    E  	LD	A,(PORT06)
+       694  0BF0 CB 8F          	RES	1,A		;RESET THE LOAD DISABLE
+       695  0BF2 D3 06          	OUT	06H,A
+       696  0BF4 32 00 00    E  	LD	(PORT06),A
+       697  0BF7 C9             	RET
+       698  0BF8
+       699  0BF8
+       700  0BF8 3A 00 00    E  SETUP:	LD	A,(TIMEREG)
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  15
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       701  0BFB CB 7F          	BIT	7,A		;ARE WE IN THE SETUP MODE
+       702  0BFD CA 3A 0C       	JP	Z,CHKUP
+       703  0C00 DB 01          	IN	A,01H
+       704  0C02 CB 77          	BIT	6,A		;IS THE SETUP MODE STILL REQUESTED.
+       705  0C04 C2 69 0C       	JP	NZ,SETRET	;IF IT IS NOTHING HAS CHANGED SO RETURN.
+       706  0C07 3A 00 00    E  	LD	A,(TIMEREG)
+       707  0C0A CB 77          	BIT	6,A		;ARE WE CLEARING THE SETUP FLAG.
+       708  0C0C C2 69 0C       	JP	NZ,SETRET	;IF WE ARE THEN RETURN
+       709  0C0F 3A 00 00    E  	LD	A,(REG1)
+       710  0C12 CB 4F          	BIT	1,A		;IS THE MACHINE RUNNING
+       711  0C14 CA 2F 0C       	JP	Z,UNUP		;IF NOT RESET THE SETUP MODE FLAG.
+       712  0C17 3A 00 00    E  	LD	A,(TIMEREG)
+       713  0C1A CB F7          	SET	6,A		;SET THE CLEARING FLAG
+       714  0C1C 32 00 00    E  	LD	(TIMEREG),A
+       715  0C1F 3A 00 00    E  	LD	A,(STPREG)
+       716  0C22 CB 7F          	BIT	7,A		;IS THE STOP REQUEST ALREADY SET
+       717  0C24 C2 69 0C       	JP	NZ,SETRET	;IF IT IS THEN RETURN
+       718  0C27 CB FF          	SET	7,A		;OTHERWISE SET THE STOP REQUEST FLAG
+       719  0C29 32 00 00    E  	LD	(STPREG),A
+       720  0C2C C3 69 0C       	JP	SETRET		;RETURN
+       721  0C2F
+       722  0C2F 3A 00 00    E  UNUP:	LD	A,(TIMEREG)
+       723  0C32 CB BF          	RES	7,A		;RESET THE SETUP MODE FLAG
+       724  0C34 32 00 00    E  	LD	(TIMEREG),A
+       725  0C37 C3 69 0C       	JP	SETRET		;RETURN
+       726  0C3A
+       727  0C3A DB 01          CHKUP:	IN	A,01H
+       728  0C3C CB 77          	BIT	6,A		;IS THE SET UP MODE REQUESTED
+       729  0C3E CA 69 0C       	JP	Z,SETRET
+       730  0C41 3A 00 00    E  	LD	A,(CALREG)
+       731  0C44 CB 7F          	BIT	7,A		;HAVE WE CALIBRATED THE MACHINE
+       732  0C46 CA 69 0C       	JP	Z,SETRET	;DO NOT ALLOW SETUP MODE IF NOT CALIBRATED
+       733  0C49 3A 00 00    E  	LD	A,(REG1)
+       734  0C4C CB 4F          	BIT	1,A		;IS THE MACHINE RUNNING
+       735  0C4E CA 61 0C       	JP	Z,ITUP		;IF NOT SET THE SETUP MODE FLAG
+       736  0C51 3A 00 00    E  	LD	A,(STPREG)
+       737  0C54 CB 7F          	BIT	7,A		;IS THE STOP REQUEST FLAG ALREADY SET
+       738  0C56 C2 69 0C       	JP	NZ,SETRET
+       739  0C59 CB FF          	SET	7,A		;SET THE STOP REQUEST IF IT IS NOT SET
+       740  0C5B 32 00 00    E  	LD	(STPREG),A
+       741  0C5E C3 69 0C       	JP	SETRET
+       742  0C61
+       743  0C61 3A 00 00    E  ITUP:	LD	A,(TIMEREG)
+       744  0C64 CB FF          	SET	7,A		;SET THE SETUP MODE FLAG
+       745  0C66 32 00 00    E  	LD	(TIMEREG),A
+       746  0C69 C9             SETRET:	RET
+       747  0C6A
+       748  0C6A                	
+       749                      			;************************************************
+       750                      			;*     THIS ROUTINE WILL CHECK IF THE OVEN IS ON*
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  16
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       751                      			;* AND IF SO WORK WITH THE PULSE ROUTINE TO 	*
+       752                      			;* SHUT THE OVEN OFF IT THE CHAIN SLOWS DOWN TOO*
+       753                      			;* MUCH TO PREVENT WARPING THE CHAIN.		*
+       754                      			;*     THE PULSE ROUTINE LOADS A COUNT INTO THE	*
+       755                      			;* SLOWDWN REGISTER EVERY TIME A PULSE IS 	*
+       756                      			;* RECEIVED.  THIS ROUTINE DECREMENTS THAT COUNT*
+       757                      			;* EVERY 10mS IF THE OVEN IS ON.  IF THIS COUNT	*
+       758                      			;* REACHES ZERO BEFORE THE PULSE ROUTINE RELOADS*
+       759                      			;* THE FULL COUNT THE OVEN WILL BE SHUT OFF AND	*
+       760                      			;* A STOP REQUEST GENERATED.  THE STOP REQUEST	*
+       761                      			;* IS SET SO WHEN THE SPEED IS TURNED BACK UP	*
+       762                      			;* AND THE MACHINE STOPS, THE START BUTTON WILL	*
+       763                      			;* HAVE TO BE PRESSED WHICH WILL TURN THE OVEN 	*
+       764                      			;* BACK ON AGAIN.  THIS WILL MAKE SURE THE OVEN	*
+       765                      			;* IS TURNED ON TO DRY THE PARTS AFTER PRINTING.*
+       766                      			;************************************************
+       767  0C6A
+       768  0C6A
+       769  0C6A 3A 00 00    E  OVENT:	LD	A,(PORT06)
+       770  0C6D CB 6F          	BIT	5,A		;IS THE OVEN ON
+       771  0C6F C8             	RET	Z
+       772  0C70 2A 00 00    E  	LD	HL,(OVENDWN)
+       773  0C73 2B             	DEC	HL		;DECREMENT THE SLOW COUNT
+       774  0C74 22 00 00    E  	LD	(OVENDWN),HL
+       775  0C77 7C             	LD	A,H
+       776  0C78 FE 00          	CP	00H
+       777  0C7A C0             	RET	NZ
+       778  0C7B 7D             	LD	A,L		;HAS THE COUNT TIMED OUT BEFORE THE
+       779  0C7C FE 00          	CP	00H		;PULSE ROUTINE CAN RESET IT.
+       780  0C7E C0             	RET	NZ
+       781  0C7F 2A 00 00    E  	LD	HL,(SLOWCNT)
+       782  0C82 ED 5B 00 00 E  	LD	DE,(SLOWDWN)	;CHECK IF THE PULSE COUNT HAS REACHED THE
+       783  0C86 7C             	LD	A,H		;MINIMUM REQUIRED.
+       784  0C87 92             	SUB	D
+       785  0C88 CA 91 0C       	JP	Z,OKSF		;CHECK IF THE UPPER BYTE IS EQUAL
+       786  0C8B FA B3 0C       	JP	M,ALLOK		;CHECK IF THE UPPER BYTE IS GREATER
+       787  0C8E C3 A0 0C       	JP	NOTOK
+       788  0C91 2A 00 00    E  OKSF:	LD	HL,(SLOWCNT)
+       789  0C94 ED 5B 00 00 E  	LD	DE,(SLOWDWN)
+       790  0C98 7D             	LD	A,L
+       791  0C99 93             	SUB	E
+       792  0C9A CA B3 0C       	JP	Z,ALLOK
+       793  0C9D FA B3 0C       	JP	M,ALLOK
+       794  0CA0 3A 00 00    E  NOTOK:	LD	A,(PORT06)
+       795  0CA3 CB AF          	RES	5,A
+       796  0CA5 D3 06          	OUT	06H,A
+       797  0CA7 32 00 00    E  	LD	(PORT06),A
+       798  0CAA 3A 00 00    E  	LD	A,(STPREG)
+       799  0CAD CB FF          	SET	7,A
+       800  0CAF 32 00 00    E  	LD	(STPREG),A
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  17
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       801  0CB2 C9             	RET
+       802  0CB3
+       803  0CB3 2A 00 00    E  ALLOK:	LD	HL,(OVENTME)
+       804  0CB6 22 00 00    E  	LD	(OVENDWN),HL
+       805  0CB9 21 00 00       	LD	HL,0000H
+       806  0CBC 22 00 00    E  	LD	(SLOWDWN),HL
+       807  0CBF C9             	RET
+       808  0CC0
+       809  0CC0
+       810                      			;****************************************
+       811                      			;*     THIS ROUTINE DEALS WITH THE END	*
+       812                      			;*  OF ORDER SENSOR.  WHEN THE SWITCH 	*
+       813                      			;*  WAS ASSERETED BY THE ORDER SEPERATOR*
+       814                      			;*  A BEEPER WAS TURNED ON.  THIS CALLED*
+       815                      			;*  ROUTINE WILL DECREMENT EVERY 10mS	*
+       816                      			;*  AND TURN OFF THE BEEPER WHEN THE 	*
+       817                      			;*  COUNT HAS REACHED ZERO.  ONCE THE 	*
+       818                      			;*  BEEPER HAS SHUT OFF THE END OF ORDER*
+       819                      			;*  SWITCH IS CHECKED AGAIN.  IF IT IS	*
+       820                      			;*  STILL ACTIVE A FLAG (BEEPED) WILL BE*
+       821                      			;*  SET TO PREVENT THE BEEPER FROM BEING*
+       822                      			;*  STARTED AGAIN.  THIS IS DONE IN CASE*
+       823                      			;*  THE MACHINE IS STOPPED WITH THE 	*
+       824                      			;*  BREAKER UNDER THE SWITCH CAUSING THE*
+       825                      			;*  THE TONE TO CONTINUOUSLY BEING 	*
+       826                      			;*  SOUNDED.				*
+       827                      			;*    THE TONE WILL ONLY BE HEARD ONCE 	*
+       828                      			;*  FOR ITS DESIGNATED AMOUNT OF TIME 	*
+       829                      			;*  IF EITHER THE SWITCH IS MOMENTARILY	*
+       830                      			;*  ACTIVE OR IF IT HELD LONGER.	*
+       831                      			;****************************************
+       832  0CC0
+       833  0CC0
+       834  0CC0 3A 00 00    E  BEEP:	LD	A,(REG1)
+       835  0CC3 CB 77          	BIT	6,A		;IS THE BEEP PROCESS FLAG SET
+       836  0CC5 C8             	RET	Z
+       837  0CC6
+       838  0CC6 3A 00 00    E  	LD	A,(REG1)
+       839  0CC9 CB 7F          	BIT	7,A		;IS THE BEEPED FLAG SET
+       840  0CCB C2 F1 0C       	JP	NZ,EOOCHK
+       841  0CCE
+       842  0CCE 3A 00 00    E  	LD	A,(BEEPCNT)
+       843  0CD1 3D             	DEC	A		;DECREMENT THE BEEPER ON COUNT
+       844  0CD2 32 00 00    E  	LD	(BEEPCNT),A
+       845  0CD5 FE 00          	CP	00H		;SEE IF THE BEEPER HAS TIMED OUT
+       846  0CD7 C0             	RET	NZ
+       847  0CD8
+       848  0CD8 3A 00 00    E  	LD	A,(REG1)	;IF SO SET THE BEEPED FLAG
+       849  0CDB CB FF          	SET	7,A
+       850  0CDD 32 00 00    E  	LD	(REG1),A
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  18
+
+
+
+ ERR  LINE  ADDR OBJ
+
+       851  0CE0
+       852  0CE0 DB 01          	IN	A,01H
+       853  0CE2 CB 7F          	BIT	7,A		;IS THE ERROR LIGHT ON
+       854  0CE4 CA EC 0C       	JP	Z,BEEPOFF
+       855  0CE7 3E A0          	LD	A,0A0H		;TURN OFF THE BEEPER (0 OUTPUT AT 7507 CARD)
+       856  0CE9 D3 01          	OUT	01H,A		;& TURN ON THE ERROR LIGHT BUT NO INPUT PORTS
+       857  0CEB C9             	RET			;****ADDED AS A DEBUG STEP
+       858  0CEC
+       859  0CEC                	
+       860  0CEC 3E 20          BEEPOFF:LD	A,20H		;LOAD A COUNT TO TURN OFF THE BEEPER BUT NOT
+       861  0CEE D3 01          	OUT	01H,A		;TURN ON THE ERROR LIGHT SINCE IT WAS NOT ON.
+       862  0CF0 C9             	RET			;******ADDED AS A DEBUG STEP
+       863  0CF1
+       864  0CF1 3E 00          EOOCHK:	LD	A,00H		;CHECK THE END OF ORDER SWITCH
+       865  0CF3 CB 6F          	BIT	5,A
+       866  0CF5 C0             	RET	NZ		;IF IT IS STILL SET RETURN
+       867  0CF6 3A 00 00    E  	LD	A,(REG1)
+       868  0CF9 CB B7          	RES	6,A		;WHEN IT IS NO LONGER RIDING ON THE BREAKER
+       869  0CFB CB BF          	RES	7,A		;RESET THE BEEPED FLAG AND THE BEEP REQUEST.
+       870  0CFD 32 00 00    E  	LD	(REG1),A
+       871  0D00 C9             	RET
+       872  0D01
+       873  0D01
+       874  0D01                	END
+
+   ASSEMBLER ERRORS =    0
+            Microtec ASMZ80 V4.4f     Aug-17-89  14:13    PAGE  19
+
+
+
+                              CROSS REFERENCE
+
+ LABEL      Value          Reference
+
+ AIRCNT   E 0007               23    99
+ AIRDONE    0827               59   -62
+ AIRDWN   E 0008               22   100   106   108
+ AIROFF     08B8               65   121  -130
+ AIRON      08AD              117  -124
+ ALLOK      0CB3              786   792   793  -803
+ ARECAL     09C9              295  -315
+ AREJOG     09D6              300  -321
+ ARESTR     09E1              303  -326
+ BEEP       0CC0              188  -834
+ BEEPCNT  E 000E               23   842   844
+ BEEPOFF    0CEC              854  -860
+ BOWLCNT  E 0016               21   476
+ BOWLDWN  E 0017               21   382   384   477
+ BYEBYE     0A48              381   387   390  -398
+ CALNOT     0861               74    80   -87
+ CALREG   E 0003               20    68    72    75    77   259   278   287
+                              315   318   670   673   678   730
+ CHKPAR     0AE6              500   503  -507
+ CHKSPD     0AC3              459   462   468  -481   486
+ CHKUP      0C3A              702  -727
+ CHREC    E 0002               20    50
+ CHUOUT     0B9B              635  -649
+ CHUTEO     0B73              186  -633
+ DECAIR     088B               98  -106
+ DISPOLL  E 0015               23    49
+ DOROPN     0B68              601  -618
+ EOOCHK     0CF1              840  -864
+ ERRREG   E 000A               20
+ ESICNT   E 0009               21
+ ESIDWN   E 000C               21   403   405
+ ESIRLY   E 0012               23    78    85
+ ISASTP     0B5D              594  -612
+ ITUP       0C61              735  -743
+ KILLMCR    08D1               53  -141
+ LOADER     0AE7              180  -527
+ LOADIT     0AF3              529  -532
+ MCR        08F9               64  -179
+ MCRCAL     095E              191  -259
+ MCRCNT   E 000B               21   137
+ MCRDWN   E 000D               22   138   141   143
+ MCROFF     0922               89    93  -210
+ MCROUT     0834               56   -68   157
+ MEMORY   M 0000                0
+ NARG       0000                0
+ NOAIR      0874               60   -96
+ NOLOAD     0B0C              531  -543
+
+ NOMORE     0B5A              598  -602   615   621
+ NOTCAL     083F               70   -72
+ NOTOK      0CA0              787  -794
+ NOTOUT     098F              264  -278
+ OCHUTE     0BB7              638   648   651  -660
+ OFFMCR     0953              225  -230
+ OKSF       0C91              785  -788
+ OUTCNT   E 0013               20
+ OUTDWN   E 0014               22   265   267   268   365   367
+ OVENDWN  E 0019               23   772   774   804
+ OVENT      0C6A              182  -769
+ OVENTME  E 0018               23   803
+ PARCHK     0ACF              184  -498
+ PORT04   E 0004               22   408   412
+ PORT06   E 0006               21   133   136   150   153   215   222   226
+                              229   274   277   373   376   394   397   472
+                              475   538   541   546   549   639   643   656
+                              659   686   689   693   696   769   794   797
+ REG1     E 0000               20   189   210   214   230   232   577   585
+                              587   709   733   834   838   848   850   867
+                              870
+ REG2     E 0001               20    51   130   132   154   156   223   431
+                              433   460   466   478   480   483   485   532
+                              535   537   543   550   552   636   644   647
+                              649   652   655   690
+ RESCAL     0BB8               71  -670
+ RESSYN     0AC4              465  -483
+ RUNMODE    0B25              192  -577
+ RUNREG   E 000F               20   321   323   326   328   400   413   415
+                              416   418   498   504   506   682   685
+ SETRET     0C69              705   708   717   720   725   729   732   738
+                              741  -746
+ SETUP      0BF8              179  -700
+ SHIFT2   E 0005               22
+ SLOWCNT  E 001A               22   781   788
+ SLOWDWN  E 001B               22   782   789   806
+ SPDCHK     0A84              185  -457
+ STACK    S 0000                0
+ STPREG   E 0010               21   589   612   614   618   620   679   681
+                              715   719   736   740   798   800
+ STPREQ     0B3C              579   583  -589
+ STRJOG     09B8              289  -298
+ SYNHIS     0A76              187  -428
+ TIME1      0A1B              181  -379
+ TIME2      0A49              364   369   377  -400
+ TIMER      09F2              183  -362
+ TIMEREG  E 0011               20    57    87    90    92    96   101   103
+                              118   120   124   127   262   271   273   284
+                              362   370   372   379   391   393   457   469
+                              471   596   700   706   712   714   722   724
+                              743   745
+ UNUP       0C2F              711  -722
+ UPCHK      09A6              283  -287
+ UPDATE     0800               25   -45
+
+ UPEND      09EC               61    66   146   149   212   233   261   270
+                              280   286   296   304   319   324   329  -340
+                              591   602
+
+
